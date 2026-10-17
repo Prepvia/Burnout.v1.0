@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox (3) - alice@acme-ceramics.com - Gmail</title>
+<script>var GLOBALS=[null,null,1,"x",2,"y",3,4,5,"abc123def0",6];</script>
+<style>
+  body { margin: 0; font: 14px Roboto, Arial, sans-serif; color: #1f1f1f; background: #f6f8fc; }
+  .top { height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 16px; }
+  .logo { font-size: 22px; color: #5f6368; }
+  .search { flex: 1; max-width: 720px; height: 46px; border-radius: 24px; background: #e9eef6; display: flex; align-items: center; padding: 0 18px; color: #5f6368; }
+  .wrap { display: flex; }
+  .nav { width: 220px; padding: 8px 0; }
+  .nav div { padding: 6px 24px; border-radius: 0 16px 16px 0; color: #1f1f1f; }
+  .nav .on { background: #d3e3fd; font-weight: 600; }
+  .main { flex: 1; background: #fff; border-radius: 16px; margin: 0 16px 16px 0; min-height: 640px; padding: 8px 0; }
+  .ha { padding: 12px 24px 8px 72px; display: flex; align-items: center; }
+  h2.hP { font-size: 22px; font-weight: 400; margin: 0; }
+  .msg { padding: 10px 24px 10px 72px; border-bottom: 1px solid #eee; }
+  .gD { font-weight: 700; }
+  .g3 { color: #5f6368; font-size: 12px; margin-left: 8px; }
+  .a3s { margin-top: 8px; white-space: pre-line; }
+  .bar { padding: 16px 72px; display: flex; gap: 10px; }
+  .ams { border: 1px solid #c4c7c5; border-radius: 18px; padding: 8px 18px; cursor: pointer; color: #444746; font-weight: 500; }
+  .M9 { margin: 0 24px 24px 72px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.25); padding: 12px; display: none; }
+  .M9.open { display: block; }
+  .Am { min-height: 140px; outline: none; white-space: pre-wrap; }
+  .sig { color: #5f6368; }
+  .sendbar { margin-top: 10px; }
+  .send { display: inline-block; background: #0b57d0; color: #fff; border-radius: 18px; padding: 8px 22px; font-weight: 500; }
+  table.F { width: 100%; border-collapse: collapse; display: none; }
+  table.F.on { display: table; }
+  tr.zA td { padding: 10px 16px; border-bottom: 1px solid #f1f1f1; }
+  .thread { display: none; }
+  .thread.on { display: block; }
+</style>
+</head>
+<body>
+<div class="top"><div class="logo">Gmail <small>(test page)</small></div><div class="search">Search mail</div></div>
+<div class="wrap">
+  <div class="nav"><div class="on">Inbox</div><div>Starred</div><div>Sent</div><div>Drafts</div></div>
+  <div class="main" role="main">
+    <table class="F" id="list-sent"><tbody>
+      <tr class="zA yO"><td><span data-thread-id="#thread-f:1" data-legacy-thread-id="18f0aaaa00000001">To: Mia</span></td><td>Order of 20 plates</td></tr>
+      <tr class="zA yO"><td><span data-thread-id="#thread-f:2" data-legacy-thread-id="18f0aaaa00000002">To: Leo</span></td><td>Mug quote</td></tr>
+    </tbody></table>
+    <table class="F" id="list-sent-p2"><tbody>
+      <tr class="zA yO"><td><span data-thread-id="#thread-f:3" data-legacy-thread-id="18f0aaaa00000003">To: Nina</span></td><td>Glazing lead time</td></tr>
+    </tbody></table>
+    <div class="thread on" id="thread">
+      <div class="ha"><h2 class="hP" data-legacy-thread-id="18f0c0ffee000001" data-thread-perm-id="thread-f:18f0c0ffee000001">Re: 40 mugs</h2></div>
+      <div class="msg adn ads"><span class="gD" email="sarah@client-shop.com">Sarah Kim</span><span class="g3" title="Oct 16">Oct 16</span><div class="a3s">Hi Alice,
+Can you glaze 40 mugs by Tuesday? We are slammed &amp; need them fast.
+Thanks, Sarah</div></div>
+      <div class="msg adn ads"><span class="gD" email="alice@acme-ceramics.com">Alice Doe</span><span class="g3" title="Oct 16">Oct 16</span><div class="a3s">Hi Sarah,
+Yes. Custom glazing is $12 per mug and takes 3 business days.
+Best, Alice</div></div>
+      <div class="msg adn ads"><span class="gD" email="sarah@client-shop.com">Sarah Kim</span><span class="g3" title="Oct 17">Oct 17</span><div class="a3s" id="last-body">Great. Can you also send the invoice? Our PO is 7781.
+Thanks, Sarah</div></div>
+      <div class="bar"><span class="ams bkH" role="button">Reply</span><span class="ams bkG" role="button">Forward</span></div>
+      <div class="M9" id="reply"><div class="Am Al editable" contenteditable="true" role="textbox" aria-label="Message Body"><div class="sig">--
+Alice Doe · Acme Ceramics</div></div><div class="sendbar"><span class="send">Send</span></div></div>
+    </div>
+    <div class="thread" id="thread2">
+      <div class="ha"><h2 class="hP" data-legacy-thread-id="18f0c0ffee000002" data-thread-perm-id="thread-f:18f0c0ffee000002">20 plates for our new cafe</h2></div>
+      <div class="msg adn ads"><span class="gD" email="mia@corner-cafe.com">Mia Chen</span><span class="g3" title="Oct 17">Oct 17</span><div class="a3s">Hi Alice,
+We are opening a cafe next month. Could you make 20 plates with our logo? What would it cost, and how long would it take?
+Thanks, Mia</div></div>
+      <div class="bar"><span class="ams bkH" role="button">Reply</span><span class="ams bkG" role="button">Forward</span></div>
+      <div class="M9" id="reply2"><div class="Am Al editable" contenteditable="true" role="textbox" aria-label="Message Body"><div class="sig">--
+Alice Doe · Acme Ceramics</div></div><div class="sendbar"><span class="send">Send</span></div></div>
+    </div>
+  </div>
+</div>
+<script>
+  // search by period, like the real Gmail: "in:sent newer_than:7d" etc.
+  function route() {
+    var h = decodeURIComponent(location.hash.replace(/\+/g, ' '));
+    document.getElementById('list-sent').classList.toggle('on', h === '#search/in:sent newer_than:7d');
+    document.getElementById('list-sent-p2').classList.toggle('on', h === '#search/in:sent older_than:7d newer_than:30d');
+    // a second email (#inbox/FMfcgzQXJplates), used to show Auto-draft
+    var plates = h === '#inbox/FMfcgzQXJplates';
+    document.getElementById('thread').classList.toggle('on', !plates && !/^#(search|sent)/.test(h));
+    document.getElementById('thread2').classList.toggle('on', plates);
+  }
+  window.addEventListener('hashchange', route);
+  document.querySelectorAll('.bkH').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.closest('.thread').querySelector('.M9').classList.add('open');
+    });
+  });
+  route();
+</script>
+</body>
+</html>

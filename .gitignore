@@ -1,0 +1,17 @@
+dist/
+node_modules/
+preview/shots/
+*.log
+
+preview/shots-en/
+preview/live/
+preview/live-*/
+__pycache__/
+
+# keys and system files: never committed
+*.pem
+*.crx
+.DS_Store
+Thumbs.db
+.env*
+.venv/

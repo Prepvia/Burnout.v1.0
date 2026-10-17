@@ -1,0 +1,5 @@
+# LF everywhere, also in a Windows clone (the tests read the files as text)
+* text=auto eol=lf
+*.png binary
+*.pdf binary
+*.zip binary

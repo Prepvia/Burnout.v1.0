@@ -1,0 +1,22 @@
+{
+  "appName": {
+    "message": "Burnout for Gmail",
+    "description": "Extension name"
+  },
+  "appDesc": {
+    "message": "Writes your Gmail replies with your business's AI: Gemini, ChatGPT, Claude or your own. You review and send.",
+    "description": "Short description (up to 132 characters)"
+  },
+  "actionTitle": {
+    "message": "Open Burnout",
+    "description": "Tooltip of the toolbar icon"
+  },
+  "chipLabel": {
+    "message": "Reply with Burnout",
+    "description": "Button next to the email subject in Gmail"
+  },
+  "chipTitle": {
+    "message": "Opens Burnout and writes the reply to this email",
+    "description": "Tooltip of the button next to the subject"
+  }
+}

@@ -41,11 +41,9 @@
   <div class="nav"><div class="on">Inbox</div><div>Starred</div><div>Sent</div><div>Drafts</div></div>
   <div class="main" role="main">
     <table class="F" id="list-sent"><tbody>
-      <tr class="zA yO"><td><span data-thread-id="#thread-f:1" data-legacy-thread-id="18f0aaaa00000001">To: Mia</span></td><td>Order of 20 plates</td></tr>
-      <tr class="zA yO"><td><span data-thread-id="#thread-f:2" data-legacy-thread-id="18f0aaaa00000002">To: Leo</span></td><td>Mug quote</td></tr>
-    </tbody></table>
-    <table class="F" id="list-sent-p2"><tbody>
-      <tr class="zA yO"><td><span data-thread-id="#thread-f:3" data-legacy-thread-id="18f0aaaa00000003">To: Nina</span></td><td>Glazing lead time</td></tr>
+      <tr class="zA yO" data-days-ago="1"><td><span data-thread-id="#thread-f:1" data-legacy-thread-id="18f0aaaa00000001">To: Mia</span></td><td>Order of 20 plates</td></tr>
+      <tr class="zA yO" data-days-ago="3"><td><span data-thread-id="#thread-f:2" data-legacy-thread-id="18f0aaaa00000002">To: Leo</span></td><td>Mug quote</td></tr>
+      <tr class="zA yO" data-days-ago="45"><td><span data-thread-id="#thread-f:3" data-legacy-thread-id="18f0aaaa00000003">To: Nina</span></td><td>Glazing lead time</td></tr>
     </tbody></table>
     <div class="thread on" id="thread">
       <div class="ha"><h2 class="hP" data-legacy-thread-id="18f0c0ffee000001" data-thread-perm-id="thread-f:18f0c0ffee000001">Re: 40 mugs</h2></div>
@@ -73,11 +71,31 @@ Alice Doe · Acme Ceramics</div></div><div class="sendbar"><span class="send">Se
   </div>
 </div>
 <script>
-  // search by period, like the real Gmail: "in:sent newer_than:7d" etc.
+  // search by period, like the real Gmail: "in:sent after:2026/9/1 before:2026/10/1" (after: counts
+  // its own day, before: doesn't). Each row says how many days ago it was sent.
+  function dayOf(s) {
+    var p = s.split('/');
+    return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000;
+  }
   function route() {
     var h = decodeURIComponent(location.hash.replace(/\+/g, ' '));
-    document.getElementById('list-sent').classList.toggle('on', h === '#search/in:sent newer_than:7d');
-    document.getElementById('list-sent-p2').classList.toggle('on', h === '#search/in:sent older_than:7d newer_than:30d');
+    var list = document.getElementById('list-sent');
+    var m = /^#search\/in:sent\b(.*)$/.exec(h);
+    var any = false;
+    if (m) {
+      var a = /after:(\d{4}\/\d{1,2}\/\d{1,2})/.exec(m[1]);
+      var b = /before:(\d{4}\/\d{1,2}\/\d{1,2})/.exec(m[1]);
+      var lo = a ? dayOf(a[1]) : -Infinity;
+      var hi = b ? dayOf(b[1]) : Infinity;
+      var today = Math.floor(Date.now() / 86400000);
+      list.querySelectorAll('tr').forEach(function (tr) {
+        var d = today - Number(tr.getAttribute('data-days-ago'));
+        var show = d >= lo && d < hi;
+        tr.style.display = show ? '' : 'none';
+        any = any || show;
+      });
+    }
+    list.classList.toggle('on', any);
     // a second email (#inbox/FMfcgzQXJplates), used to show Auto-draft
     var plates = h === '#inbox/FMfcgzQXJplates';
     document.getElementById('thread').classList.toggle('on', !plates && !/^#(search|sent)/.test(h));

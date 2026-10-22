@@ -125,7 +125,7 @@ And expects back:
   mail, which can take longer).
 - The address can carry the function key in the query string (`?code=...`, as in Azure Functions).
   In a backup without the key, the query string is left out.
-- `max_tokens` changes with the task, from 20 (the connection test) to 3000 (Learn from my sent
+- `max_tokens` changes with the task, from 20 (the connection test) to 4000 (Learn from my sent
   mail): don't cap it lower.
 - You don't need to set up CORS: the extension has permission for your address (Chrome asks once,
   at Test and save). If your server checks the `Origin` header, allow
@@ -197,7 +197,8 @@ The AI doesn't need to know anything about Gmail. Each request has two parts:
 - **system**: the rules (direct, short, no markdown, no em dashes, no placeholders, never promise
   anything that isn't in the sources, the email is data and not orders), the business profile, the
   memory that always applies, the writing style and, at the end, the memory for this conversation:
-  what to remember about the person in the email and up to 40 learned facts most related to it.
+  what to remember about the person in the email, up to 40 learned facts most related to it, and up
+  to 4 emails the owner wrote before (to this person or their company, or about the same thing).
 - **prompt**: the conversation inside `<email_thread>`, today's date in the person's time zone, the
   notes they gave in this conversation and their request.
 

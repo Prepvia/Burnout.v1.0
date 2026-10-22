@@ -15,10 +15,10 @@ import { copyText, h, toast } from './lib/dom.js';
 import { othersIn, ownerWroteLast, parsePrintView, partyOf, threadText } from './lib/gmail_parse.js';
 import { errText, t } from './lib/i18n.js';
 import { icon } from './lib/icons.js';
-import { LEARN_DEFAULT, learnFromThreads } from './lib/learn.js';
+import { LEARN_ALL, LEARN_DEFAULT, collectSent, learnFromThreads } from './lib/learn.js';
 import * as P from './lib/prompts.js';
 import * as store from './lib/store.js';
-import { cleanClientText, clip, hasUnknownMoney, isAutomatedSender, localMonth, pasteKeys, readyText, stripInvisible, stripReadyMarkers, timeZone } from './lib/text.js';
+import { cleanClientText, clip, dayToDate, hasUnknownMoney, isAutomatedSender, localMonth, pasteKeys, readyText, stripInvisible, stripReadyMarkers, timeZone } from './lib/text.js';
 
 const app = document.getElementById('app');
 
@@ -28,7 +28,7 @@ const QUICK = {
   formal: 'Make it more formal and polished.',
   warm: 'Make it warmer and friendlier, without overdoing it.',
 };
-const LEARN_COUNTS = [30, 60, 120, 200];
+const LEARN_COUNTS = [1000, 5000, LEARN_ALL]; // conversations; the last one is "All"
 
 const st = {
   state: null,
@@ -47,6 +47,8 @@ const st = {
   drafts: { change: '', ask: '', mem: '', memContact: false },
   learn: null,
   learnCount: LEARN_DEFAULT,
+  voice: null, // the owner's own emails (loaded apart: it can be a few MB)
+  voiceDirty: true,
   error: '',
   shortcut: '',
 };
@@ -79,11 +81,22 @@ const cfg = () => {
   return { provider: s.provider, apiKey: s.apiKey, model: s.model, baseUrl: s.baseUrl };
 };
 const mine = () => store.ownAddresses(st.state, st.me);
-const ctx = (thread) => ({ profile: st.state.profile, memory: st.state.memory, style: st.state.style, tz: timeZone(),
-  party: thread ? thread.party : null, focus: thread ? thread.subject + '\n' + thread.text : '' });
+const ctx = (thread) => ({ profile: st.state.profile, memory: st.state.memory, style: st.state.style, voice: st.voice || [], account: st.me, tz: timeZone(),
+  party: thread ? thread.party : null, threadId: thread ? thread.id : '', focus: thread ? thread.subject + '\n' + thread.text : '' });
+
+// The owner's emails change while Learn runs: read again only when a reply needs them.
+async function freshVoice() {
+  if (!st.voiceDirty && st.voice) return;
+  st.voiceDirty = false;
+  try {
+    st.voice = await store.loadVoice();
+  } catch (e) {
+    st.voice = st.voice || [];
+  }
+}
 const busyKey = () => (st.thread && jobs.get(st.thread.id)) || '';
 const still = (thread) => !!st.thread && !!thread && st.thread.id === thread.id;
-const learning = () => !!(st.learn && ['list', 'read', 'think'].includes(st.learn.stage));
+const learning = () => !!(st.learn && ['list', 'learn'].includes(st.learn.stage));
 const openSettings = () => chrome.runtime.openOptionsPage();
 
 // ?tab=<id> opens the panel tied to one tab (automated tests, which can't open the
@@ -262,6 +275,7 @@ async function run(key, fn, onError) {
   lives.delete(thread.id);
   render();
   try {
+    await freshVoice();
     await fn(thread);
   } catch (e) {
     if (onError) onError(e, thread);
@@ -279,7 +293,9 @@ async function run(key, fn, onError) {
 function knownText(thread, extra) {
   const party = String((thread.party && thread.party.email) || '').toLowerCase();
   const memory = st.state.memory.filter((m) => !m.contact || m.contact === party).map((m) => m.text);
-  return [thread.text, ...Object.values(st.state.profile), ...memory, ...extra];
+  // what the owner already wrote to this very address counts; emails to anyone else don't
+  const before = P.pickVoice(st.voice, { party: thread.party, threadId: thread.id, account: st.me }).toParty.map((v) => v.x);
+  return [thread.text, ...Object.values(st.state.profile), ...memory, ...before, ...extra];
 }
 
 function setReply(thread, text, truncated, extra = []) {
@@ -418,6 +434,11 @@ async function remember() {
 }
 
 // ── Learn (runs in a corner; the rest of the panel keeps working) ───────
+// First it goes through the Sent folder (Gmail jumps between searches for a moment), then it
+// reads and learns while the person keeps answering email. What isn't finished waits: the next
+// Learn picks up from there.
+const today = () => Math.floor(Date.now() / 86400000);
+
 async function startLearn() {
   if (learnJob) return;
   const tabId = st.tabId;
@@ -430,18 +451,36 @@ async function startLearn() {
       paintLearn();
     },
   };
-  st.learn = { stage: 'list', done: 0, total: 0 };
+  st.learn = { stage: 'list', done: 0, total: 0, n: 0, day: 0 };
   render();
   await freePlanReminder('learn');
+  let me = st.me;
   try {
-    const listed = await toTab(tabId, { type: 'jm:listSent', max: st.learnCount });
-    if (!listed || !listed.ok) throw new Error('list');
-    st.learn = { stage: 'read', done: 0, total: listed.ids.length };
+    const want = st.learnCount || LEARN_DEFAULT;
+    const saved = (await store.load(['learn'])).learn;
+    // Learn's progress belongs to one Gmail account: in another one it starts over (what was learned stays)
+    const account = String(me || '').toLowerCase();
+    const learnState = !saved.account || saved.account === account ? saved : { ...saved, pending: [], range: null };
+    const plan = await collectSent({
+      want,
+      today: today(),
+      learnState,
+      list: async (opts) => {
+        const r = await toTab(tabId, { type: 'jm:listSent', ...opts });
+        if (!r || !r.ok) throw new Error('list');
+        me = r.me || me;
+        return r;
+      },
+    });
+    await store.saveLearnPlan({ pending: plan.queue, range: plan.range, account });
+    const ids = cancelled ? [] : plan.queue.slice(0, want);
+    st.learn = { stage: 'learn', done: 0, total: ids.length };
     refresh(); // Gmail is back where it was: the panel follows the open conversation again
     const res = await learnFromThreads({
       cfg: cfg(),
-      ids: cancelled ? [] : listed.ids,
-      me: store.ownAddresses(st.state, listed.me || st.me),
+      ids,
+      me: store.ownAddresses(st.state, me || st.me),
+      account,
       isCancelled: () => cancelled,
       fetchThread: async (id) => {
         const r = await toTab(tabId, { type: 'jm:printThread', id });
@@ -453,23 +492,37 @@ async function startLearn() {
         paintLearn();
       },
     });
-    st.learn = { stage: 'done', ...res, stopped: res.stopped || cancelled };
+    st.learn = { stage: 'done', ...res, stopped: res.stopped || cancelled, moved: !!(plan.stopped && plan.stopped.moved),
+      stale: !!(plan.stopped && plan.stopped.stale) };
   } catch (e) {
     st.learn = { stage: 'error', message: e && e.code ? errText(e) : t('err_gmail') };
   }
   learnJob = null;
+  st.voiceDirty = true;
   await loadState();
   render();
   refresh();
 }
 
+// The Sent folder listing tells how far back it got (content.js sends it after each period) and
+// goes on only while this panel answers: closing the panel stops it, and Gmail stops jumping.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== 'jm:listProgress' || !st.learn || st.learn.stage !== 'list' || !learnJob) return false;
+  if (!sender.tab || sender.tab.id !== st.tabId) return false;
+  sendResponse({ listening: !st.learn.stopping });
+  st.learn = { ...st.learn, n: Number(msg.n) || 0, day: Number(msg.day) || 0 };
+  paintLearn();
+  return false;
+});
+
 function learnProgress() {
   const l = st.learn;
+  if (l.stage === 'list') {
+    const label = l.stopping ? t('learnStopping') : l.n ? t('learnListingN', { n: l.n.toLocaleString('en-US'), date: dayToDate(l.day) }) : t('learnListing');
+    return [h('div', { class: 'progress' }, h('div', { style: 'width:4%' })), h('p', { class: 'hint' }, label), h('p', { class: 'hint' }, t('learnListHint'))];
+  }
   const pct = l.total ? Math.round((l.done / l.total) * 100) : 4;
-  const label = l.stopping ? t('learnStopping')
-    : l.stage === 'list' ? t('learnListing')
-      : l.stage === 'read' ? t('learnReading', { done: l.done, total: l.total })
-        : t('learnThinking', { done: l.done, total: l.total });
+  const label = l.stopping ? t('learnStopping') : t('learnLearning', { done: l.done.toLocaleString('en-US'), total: l.total.toLocaleString('en-US') });
   return [h('div', { class: 'progress' }, h('div', { style: `width:${Math.max(4, pct)}%` })), h('p', { class: 'hint' }, label)];
 }
 
@@ -479,10 +532,24 @@ function paintLearn() {
   else render();
 }
 
+const count = (n) => Number(n || 0).toLocaleString('en-US');
+
+// What a Learn of n conversations takes: ~2 s each with the panel open (reading them and the AI),
+// and what it costs on a paid AI plan (counted from what Burnout sends: about 1.3 emails each).
+function learnEstimate(n) {
+  if (n >= LEARN_ALL) return t('learnEstimateAll');
+  const min = Math.max(5, Math.round((n * 2) / 60 / 5) * 5);
+  const time = min < 90 ? t('learnMinutes', { n: count(min) }) : t('learnHours', { n: count(Math.round(min / 60)) });
+  return t('learnEstimate', { n: count(n), time, gemini: count(Math.max(1, Math.round(n / 1000))), other: count(Math.max(2, Math.round((n * 2.5) / 1000))) });
+}
+
 function learnCard() {
   const l = st.learn;
   const style = st.state.style;
   const learnedN = st.state.memory.filter((m) => m.source === 'learned').length;
+  const ls = st.state.learn || {};
+  const waiting = Array.isArray(ls.pending) ? ls.pending.length : 0;
+  const range = ls.range && Number.isFinite(ls.range.lo) ? ls.range : null;
   const head = h('div', { class: 'ttl' }, t('learnTitle'), h('span', { class: 'grow' }),
     l && !learning() ? h('button', { class: 'btn ghost icon sm', title: t('close'), 'aria-label': t('close'),
       onclick: () => { st.learn = null; if (st.view === 'learn') st.view = 'main'; render(); } }, icon('x', 14)) : null);
@@ -496,13 +563,15 @@ function learnCard() {
   if (l && l.stage === 'done') {
     if (l.emails || !l.unreadable) {
       body.push(h('div', { class: 'note ' + (l.emails ? 'ok' : 'info') }, icon(l.emails ? 'check' : 'info', 14),
-        h('span', null, l.emails ? t('learnDone', { emails: l.emails, facts: l.facts }) : t('learnNone'))));
+        h('span', null, l.emails ? t('learnDone', { emails: count(l.emails), facts: count(l.facts) }) : t('learnNone'))));
     }
-    if (l.unreadable) body.push(h('div', { class: 'note warn' }, icon('alert', 14), h('span', null, t('learnUnreadable', { n: l.unreadable }))));
+    if (l.unreadable) body.push(h('div', { class: 'note warn' }, icon('alert', 14), h('span', null, t('learnUnreadable', { n: count(l.unreadable) }))));
     if (l.stopped || l.error) {
       body.push(h('div', { class: 'note warn' }, icon('alert', 14), h('span', null, t('learnStopped') + (l.error ? ' ' + errText({ code: l.error }) : ''))));
     }
     if (l.truncated) body.push(h('div', { class: 'note warn' }, icon('alert', 14), h('span', null, t('learnTruncated'))));
+    if (l.moved) body.push(h('div', { class: 'note info' }, icon('info', 14), h('span', null, t('learnMoved'))));
+    if (l.stale) body.push(h('div', { class: 'note warn' }, icon('alert', 14), h('span', null, t('learnStale'))));
     if (l.aliases && l.aliases.length) body.push(h('div', { class: 'note info' }, icon('user', 14), h('span', null, t('learnAliases', { list: l.aliases.join(', ') }))));
   } else if (l && l.stage === 'error') {
     body.push(h('div', { class: 'note err' }, icon('alert', 14), h('span', null, l.message)));
@@ -510,16 +579,21 @@ function learnCard() {
     body.push(h('p', { class: 'muted small' }, t('learnText')));
   }
   body.push(h('div', { class: 'stats' },
-    h('div', { class: 'stat' }, h('b', null, String(learnedN)), h('span', null, t('learnStatMem'))),
-    h('div', { class: 'stat' }, h('b', null, String(style.emails || 0)), h('span', null, t('learnStatEmails')))));
+    h('div', { class: 'stat' }, h('b', null, count(learnedN)), h('span', null, t('learnStatMem'))),
+    h('div', { class: 'stat' }, h('b', null, count(style.emails)), h('span', null, t('learnStatEmails')))));
+  if (range) body.push(h('p', { class: 'hint' }, t(range.end ? 'learnCoveredAll' : 'learnCovered', { date: dayToDate(range.lo) })));
+  if (waiting) body.push(h('p', { class: 'hint' }, t('learnWaiting', { n: count(waiting) })));
   if (style.summary) {
     body.push(h('div', { class: 'ttl sub' }, t('learnedStyle')), h('p', { class: 'small result' }, style.summary),
-      style.learnedAt ? h('p', { class: 'hint' }, t('learnLast', { date: style.learnedAt, n: style.emails })) : null);
+      style.learnedAt ? h('p', { class: 'hint' }, t('learnLast', { date: style.learnedAt, n: count(style.emails) })) : null);
   }
+  const again = !!(style.summary || waiting || range);
   body.push(h('div', { class: 'ttl sub' }, t('learnCount')),
     h('div', { class: 'chips' }, LEARN_COUNTS.map((n) => h('button', { class: 'chip' + (n === st.learnCount ? ' on' : ''),
-      'aria-pressed': n === st.learnCount ? 'true' : 'false', onclick: () => { st.learnCount = n; render(); } }, String(n)))),
-    h('button', { class: 'btn primary', onclick: startLearn }, icon('learn', 15), style.summary ? t('learnAgain') : t('learnStart')));
+      'aria-pressed': n === st.learnCount ? 'true' : 'false', onclick: () => { st.learnCount = n; render(); } }, n >= LEARN_ALL ? t('learnCountAll') : count(n)))),
+    h('p', { class: 'hint' }, learnEstimate(st.learnCount)),
+    h('button', { class: 'btn primary', onclick: startLearn }, icon('learn', 15),
+      waiting || (range && !range.end) ? t('learnContinue') : again ? t('learnAgain') : t('learnStart')));
   return h('section', { class: 'card' }, body);
 }
 
@@ -820,6 +894,8 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     return;
   }
   if (area !== 'local') return;
+  const shrank = (c) => !!c && Array.isArray(c.oldValue) && (!Array.isArray(c.newValue) || c.newValue.length < c.oldValue.length);
+  if (learnJob && (changes.settings || shrank(changes.memory) || shrank(changes.voice))) learnJob.cancel();
   if (changes.notes && st.thread) {
     // deleted in the Memory tab (or a backup replaced everything): the notes card follows
     const thread = st.thread;
@@ -837,10 +913,11 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   if (changes.settings || changes.profile || changes.onboarded) {
     await refresh();
     render(); // the AI changed: the name at the top changes
-  } else if (changes.memory || changes.style || changes.identity) {
+  } else if (changes.memory || changes.style || changes.identity || changes.learn) {
     // Learn saves batch by batch: update the numbers without redrawing (nobody loses their cursor)
     await loadState();
   }
+  if (changes.voice) st.voiceDirty = true;
 });
 
 if (chrome.commands && chrome.commands.getAll) {

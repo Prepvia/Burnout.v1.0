@@ -153,6 +153,71 @@ export function keywords(text) {
   return out;
 }
 
+// ── Who an address belongs to ───────────────────────────────────────────
+const PUBLIC_DOMAIN_RE = /^(?:gmail|googlemail|yahoo|ymail|rocketmail|hotmail|outlook|live|msn|icloud|me|mac|aol|proton|protonmail|pm|gmx|web|uol|bol|terra|ig|globo|yandex|mail|zoho|hey|fastmail|qq|163|126|naver|libero|orange|free|laposte|t-online|comcast|att|verizon|sbcglobal|cox|charter|earthlink|bellsouth|optonline|btinternet|shaw|rogers|bigpond)\./;
+// relays: one address per buyer or guest, all under the marketplace's own domain
+const RELAY_DOMAIN_RE = /(?:^|\.)(?:marketplace\.amazon\.[a-z.]+|members\.ebay\.[a-z.]+|guest\.booking\.com|privaterelay\.appleid\.com|reply\.craigslist\.org|relay\.firefox\.com|duck\.com|simplelogin\.[a-z.]+|anonaddy\.[a-z.]+)$|\.edu$/;
+
+export function domainOf(email) {
+  const at = String(email || '').trim().toLowerCase().lastIndexOf('@');
+  return at < 0 ? '' : String(email).trim().toLowerCase().slice(at + 1);
+}
+
+/**
+ * A webmail (gmail.com, outlook.com...), a relay (marketplace.amazon.com, guest.booking.com...) or a
+ * school: sharing it says nothing about being the same company.
+ */
+export function isPublicDomain(domain) {
+  const d = String(domain || '').toLowerCase();
+  return !d || PUBLIC_DOMAIN_RE.test(d) || RELAY_DOMAIN_RE.test(d);
+}
+
+// ── Dates the way Gmail writes them, in the account's language ──────────
+const MONTHS = { janv: 1, jan: 1, ene: 1, gen: 1, fevr: 2, fev: 2, feb: 2, mars: 3, mar: 3, avr: 4, apr: 4, abr: 4,
+  mai: 5, may: 5, mag: 5, juin: 6, jun: 6, giu: 6, juil: 7, jul: 7, lug: 7, aout: 8, aug: 8, ago: 8,
+  sept: 9, sep: 9, set: 9, oct: 10, out: 10, okt: 10, ott: 10, nov: 11, dec: 12, dez: 12, dic: 12 };
+const pad2 = (n) => String(n).padStart(2, '0');
+const validYmd = (y, m, d) => (y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad2(m)}-${pad2(d)}` : '');
+
+/**
+ * The date of a message as the print page shows it ('Thu, Oct 16, 2026 at 10:12 AM',
+ * 'qui., 16 de out. de 2026 às 10:12', '16 oct 2026, 10:12') -> '2026-10-16'. '' when it can't
+ * tell for sure (no year, or 03/04/2026, which reads two ways).
+ */
+export function parseMailDate(text) {
+  const plain = String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  let m = plain.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (m) return validYmd(+m[1], +m[2], +m[3]);
+  const tokens = plain.match(/[a-z]+|\d+/g) || [];
+  const yi = tokens.findIndex((tk) => /^(?:19|20)\d{2}$/.test(tk));
+  if (yi < 0) return '';
+  const monthOf = (tk) => (/^[a-z]{3,}$/.test(tk) ? MONTHS[tk.slice(0, 4)] || MONTHS[tk.slice(0, 3)] || 0 : 0);
+  // the month nearest the year ("mar" is also Tuesday in Spanish: "mar, 16 oct 2026")
+  let mi = -1;
+  tokens.forEach((tk, i) => { if (monthOf(tk) && (mi < 0 || Math.abs(i - yi) < Math.abs(mi - yi))) mi = i; });
+  if (mi < 0) {
+    m = plain.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
+    if (!m) return '';
+    const [a, b, y] = [+m[1], +m[2], +m[3]];
+    if (a > 12) return validYmd(y, b, a);
+    if (b > 12) return validYmd(y, a, b);
+    return '';
+  }
+  for (const dist of [1, 2]) {
+    for (const j of [mi - dist, mi + dist]) {
+      const tk = tokens[j];
+      if (j !== yi && tk && /^\d{1,2}$/.test(tk)) return validYmd(+tokens[yi], monthOf(tokens[mi]), +tk);
+    }
+  }
+  return '';
+}
+
+/** Days since 1970-01-01 (UTC) -> 'YYYY-MM-DD'. */
+export function dayToDate(day) {
+  if (!Number.isFinite(Number(day))) return '';
+  return new Date(Math.floor(Number(day)) * 86400000).toISOString().slice(0, 10);
+}
+
 /** The user's paste shortcut: Cmd+V on a Mac, Ctrl+V elsewhere. */
 export function pasteKeys() {
   const nav = globalThis.navigator || {};

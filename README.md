@@ -71,8 +71,11 @@ Burnout shows what the file brings and asks first; then check the AI and click *
   (what a sentence really means) and Ask (a chat about the email that can write the reply for you).
 - **Remember**: facts it keeps in every reply, or only for one person ("Sarah wants invoices as a
   PDF").
-- **Learn from my sent mail**: reads emails you already sent and picks up how you write and the
-  facts that keep coming up. A price you gave one client stays with that client.
+- **Learn from my sent mail**: goes through your Sent folder (1,000 or 5,000 conversations, or all
+  of it) and picks up how you write, the facts that keep coming up and what you told each person. A
+  price you gave one client stays with that client. Your emails stay in your browser, and every reply
+  uses the ones closest to the open email as the model: what you sent before to that person, and how
+  you write to people like them. Stop whenever you want: the next Learn picks up from there.
 - **Backup** to a file, to move everything to another computer. **Alt+J** (Option+J on a Mac)
   opens the panel.
 
@@ -147,7 +150,8 @@ small contract for plugging in your own server: [docs/CONNECT_AI.md](docs/CONNEC
 
 ## Privacy
 
-Your AI key, profile, memory and chats stay in your browser (`chrome.storage.local`). An email
+Your AI key, profile, memory, chats and the emails of yours it keeps to write like you stay in your
+browser (`chrome.storage.local`). An email
 leaves the browser only to the AI you chose, when you ask for something (or when you open an email
 with Auto-draft on). Burnout never sends, deletes or archives email. Details:
 [docs/PRIVACY.md](docs/PRIVACY.md).
@@ -155,8 +159,8 @@ with Auto-draft on). Burnout never sends, deletes or archives email. Details:
 ## Security
 
 No server, no tracking, no code from the internet, and nothing it can send on its own. What it can
-and can't do, what was checked on October 21, 2026 (and fixed in 0.3.1), and how to check it
-yourself: [SECURITY.md](SECURITY.md).
+and can't do, what was checked (October 21, 2026, and again for 0.4.0 on October 22), and how to
+check it yourself: [SECURITY.md](SECURITY.md).
 
 ## For developers
 
@@ -178,7 +182,7 @@ Plain JavaScript (Manifest V3), with no build step and no dependencies.
 ### How it's tested
 
 ```
-node tests/run.mjs            # 62 tests, no dependencies (Node 18+)
+node tests/run.mjs            # 76 tests, no dependencies (Node 18+)
 python scripts/e2e.py         # the real extension in Chromium on a test Gmail page, with simulated AIs
 python scripts/live_check.py  # the real extension against a real model on your computer (Ollama)
 ```
@@ -195,7 +199,9 @@ What has been checked for real, on October 17, 2026:
   itself; loaded again from another folder, it stays one Burnout with the same settings.
 - **On a real Gmail (read only):** the selectors (`h2.hP`, `span.ams.bkH`, `tr.zA`, the reply
   box), reading 15 conversations through Gmail's print page (up to 70 messages) and listing sent
-  mail by date range. In 37 more conversations, every message sat at the same level of the page,
+  mail by date range with `newer_than:` (0.3). Since 0.4, Learn lists the Sent folder with `after:` and
+  `before:` dates, the format Google documents for Gmail search; that one hasn't run on a real Gmail
+  yet. In 37 more conversations, every message sat at the same level of the page,
   which is what stops a fake "message from you" hidden inside an email. If Gmail changes,
   `extension/content.js` and `extension/lib/gmail_parse.js` are the only places to fix.
 - **Not yet checked on a real Gmail:** putting the reply into the reply box, the panel opening from
@@ -219,8 +225,8 @@ extension/              the extension (Manifest V3, no build step, no dependenci
   lib/ai.js             the AI providers, with streaming
   lib/prompts.js        what goes to the AI
   lib/gmail_parse.js    reads Gmail's print page
-  lib/learn.js          learning from sent mail
-  lib/store.js          memory, notes, backup (all in the browser)
+  lib/learn.js          learning from sent mail, period by period, 60 conversations at a time
+  lib/store.js          memory, your saved emails, notes, backup (all in the browser)
   lib/i18n.js           screen text
 tests/                  unit tests and a fake Gmail
 scripts/                end-to-end test, live check with a real AI, icon, download zip

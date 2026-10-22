@@ -1,6 +1,6 @@
 {
   "name": "burnout-for-gmail",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "Burnout for Gmail: a Chrome extension that writes your Gmail replies with your own AI.",
   "license": "MIT",

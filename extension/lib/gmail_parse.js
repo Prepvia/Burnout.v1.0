@@ -133,6 +133,10 @@ export function htmlToText(html, { dropQuotes = true } = {}) {
   h = h.replace(/<(script|style|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
   h = removeBlocks(h, (name, attrs) => hidesText(attrs));
   if (dropQuotes) {
+    // Outlook puts only the "From: / Sent:" header of the email it answers in div#divRplyFwdMsg (after an
+    // empty div#appendonsend), and the quoted email after it, outside any quote block: from there on it's theirs
+    const outlook = h.search(/<div\b[^>]*\bid\s*=\s*["']?[\w-]*?(?:divRplyFwdMsg|appendonsend)\b/i);
+    if (outlook >= 0) h = h.slice(0, outlook);
     h = removeBlocks(h, (name, attrs) =>
       name === 'blockquote' ||
       (name === 'div' && (hasClass(attrs, 'gmail_quote') || hasClass(attrs, 'gmail_extra') ||

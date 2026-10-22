@@ -14,9 +14,11 @@ server and no account: nobody behind it, its authors included, receives anything
 - If you turn on **Auto-draft** (a switch at the top of the Burnout panel, off unless you turn it on):
   each email you open while the Burnout panel is open, so its reply is ready as a Gmail draft.
 - The text you selected with the mouse, when you click "Selected text".
-- The emails you sent, only when you click "Learn from my sent emails". Of those, only the messages
-  you wrote yourself go to the AI, with their date, recipient and subject. Other people's messages
-  are left out, and so is what you quoted from them under your reply.
+- The emails you sent, only when you click "Learn from my sent emails" (1,000 or 5,000
+  conversations, or all of them, as you choose). To find them, Burnout runs searches in your Sent
+  folder, in your own Gmail tab. Of those emails, only the messages you wrote yourself go to the AI,
+  with their date, recipient and subject. Other people's messages are left out, and so is what you
+  quoted or forwarded from them under your reply.
 
 ## Where it goes
 
@@ -47,14 +49,23 @@ Everything stays in your browser (the extension's local storage), never on a ser
 - the AI settings: which AI, the model, the address (for Other AI or Company AI) and the key;
 - the profile you filled in: name, what you do, services, hours, booking link, signature, what
   never to promise, writing style and your other email addresses;
-- the memory you wrote (up to 60 items), some of it tied to one person ("Only for Sarah");
+- the memory you wrote (up to 300 items), some of it tied to one person ("Only for Sarah");
 - what Burnout learned from your sent emails:
-  - up to 120 facts, which may include names, prices and terms. A price or term you gave a client
-    is tied to that client's email address and only goes into replies to them;
+  - up to 3,000 facts, which may include names, prices and terms. A price or term you gave a client
+    is tied to that client's email address and only goes into replies to them. When the list is
+    full, the facts from the oldest emails leave first;
+  - your own emails, to write like you: up to 3,000 of the messages you wrote (your part only, up
+    to 1,200 characters each, without card numbers or the value after "password:" or "PIN:"), with
+    their date, recipients, subject and the Gmail account they came from. Each reply uses up to 4
+    of them: up to 2 you sent before to that same address, and up to 2 style samples (to a
+    colleague at the same company, or about the same thing) with numbers, addresses and links
+    masked;
   - a summary of your writing style;
   - up to 3 excerpts of emails you wrote, as style examples;
   - the "Send mail as" addresses it recognized as yours;
-  - which conversations it already read, so it doesn't read them again;
+  - which conversations it already read and which are waiting, and how far back in your Sent
+    folder it got, so the next Learn picks up from there;
+  - how much it downloaded from Gmail in the last 24 hours, to stay under Gmail's limits;
 - the notes on each conversation: what you asked to change, with the date and the conversation's
   subject (up to 10 per conversation, for the last 200 conversations);
 - the questions you asked Burnout about each conversation and its answers, which may include a
@@ -64,12 +75,12 @@ Everything stays in your browser (the extension's local storage), never on a ser
   its message count, no content: up to the last 500);
 - the number of AI requests this month.
 
-Whole emails are not stored: Burnout reads them when you ask, uses them and discards them. Only the
-pieces listed above are kept.
+Other people's emails are not stored: Burnout reads them when you ask, uses them and discards them.
+Of your own sent emails it keeps your part, as listed above.
 
 The backup (Settings > Memory > Download backup) is a file with the above, saved wherever you
-choose, except the list of conversations Learn already read, which conversations Auto-draft already
-drafted and the request count. The AI key goes in it only if you tick that option, and then it is
+choose, except your saved emails, the conversations Learn already read or is waiting to read,
+which conversations Auto-draft already drafted and the request count. The AI key goes in it only if you tick that option, and then it is
 stored as plain text in the file. Importing a backup shows what it brings and asks first.
 
 ## What Burnout does not do
@@ -88,8 +99,9 @@ stored as plain text in the file. Importing a backup shows what it brings and as
 - Settings > Memory: delete whatever you want (memory items, and the notes on each conversation in
   Conversation notes > Delete notes) and download a backup. In the panel, each note on the open
   conversation also has a trash button to delete it.
-- Settings > Privacy > "Delete everything in Burnout": removes the key, profile, memory, notes and
-  conversations from this browser.
+- Settings > Memory > "Delete your saved emails": removes the emails Burnout kept to write like you.
+- Settings > Privacy > "Delete everything in Burnout": removes the key, profile, memory, your saved
+  emails, notes and conversations from this browser.
 - Removing the extension from Chrome deletes everything it stored.
 
 ## Questions

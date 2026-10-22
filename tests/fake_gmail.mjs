@@ -83,7 +83,19 @@ export class El {
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
 }
 
-export function makeGmail({ title = 'Inbox (3) - alice@acme-ceramics.com - Gmail', account = 0, lists = {}, printPages = {}, staleChip = false } = {}) {
+// 'YYYY/M/D' as content.js writes it in a search -> days since 1970
+const dayOfYmd = (s) => {
+  const [y, m, d] = s.split('/').map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
+};
+
+// sent: [{ id, day }] (day = days since 1970): any "in:sent [after:Y/M/D] [before:Y/M/D]" search shows
+// the matching conversations, newest first, one page only (pageSize), like Gmail. after: counts its
+// own day, before: doesn't.
+// panelClosed: nobody answers Learn's progress messages (the panel was closed).
+// frozen: Gmail doesn't run the searches (the old list stays on screen).
+export function makeGmail({ title = 'Inbox (3) - alice@acme-ceramics.com - Gmail', account = 0, lists = {}, printPages = {}, staleChip = false,
+  sent = null, pageSize = 50, panelClosed = false, frozen = false } = {}) {
   const clock = { now: 1_800_000_000_000 };
   const doc = { active: null, inserted: [], lang: 'en' };
   const body = new El('body');
@@ -96,7 +108,7 @@ export function makeGmail({ title = 'Inbox (3) - alice@acme-ceramics.com - Gmail
   };
 
   // lists: { '#sent': ['id1', 'id2'], '#sent/p2': [...], '#inbox': [...] } — one table per folder
-  for (const [hash, ids] of Object.entries(lists)) {
+  function addTable(hash, ids) {
     const table = new El('table', { class: 'F cf zt' }, { visible: false });
     for (const id of ids) {
       const row = new El('tr', { class: 'zA yO' });
@@ -106,10 +118,27 @@ export function makeGmail({ title = 'Inbox (3) - alice@acme-ceramics.com - Gmail
     main.append(table);
     world.listNodes[hash] = table;
   }
+  for (const [hash, ids] of Object.entries(lists)) addTable(hash, ids);
+
+  world.searches = []; // the Sent searches content.js ran, decoded
+  function sentSearch(hash) {
+    if (!sent || !hash.startsWith('#search/')) return null;
+    const q = decodeURIComponent(hash.slice(8).replace(/\+/g, ' '));
+    if (!/^in:sent\b/.test(q)) return null;
+    const after = (q.match(/after:(\d{4}\/\d{1,2}\/\d{1,2})/) || [])[1];
+    const before = (q.match(/before:(\d{4}\/\d{1,2}\/\d{1,2})/) || [])[1];
+    const lo = after ? dayOfYmd(after) : -Infinity;
+    const hi = before ? dayOfYmd(before) : Infinity;
+    world.searches.push(q);
+    return sent.filter((x) => x.day >= lo && x.day < hi).sort((a, b) => b.day - a.day).slice(0, pageSize).map((x) => x.id);
+  }
 
   function route(hash) {
     world.hash = hash;
     world.hashLog.push(hash);
+    if (frozen && hash.startsWith('#search/')) return;
+    const found = world.listNodes[hash] ? null : sentSearch(hash);
+    if (found) addTable(hash, found);
     for (const [h, node] of Object.entries(world.listNodes)) node.visible = h === hash;
     if (world.thread) world.thread.visible = false;
     if (world.onRoute) world.onRoute(hash);
@@ -173,7 +202,11 @@ export function makeGmail({ title = 'Inbox (3) - alice@acme-ceramics.com - Gmail
     runtime: {
       id: 'burnout-test',
       onMessage: { addListener: (fn) => world.listeners.push(fn) },
-      sendMessage: (msg) => { world.messagesOut.push(JSON.parse(JSON.stringify(msg))); return Promise.resolve(); },
+      sendMessage: (msg) => {
+        world.messagesOut.push(JSON.parse(JSON.stringify(msg)));
+        // the panel answers Learn's progress while it's open
+        return Promise.resolve(msg && msg.type === 'jm:listProgress' && !panelClosed ? { listening: true } : undefined);
+      },
     },
     i18n: { getMessage: (k) => MESSAGES[k] || '' },
   };

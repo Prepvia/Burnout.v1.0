@@ -3,9 +3,10 @@
 Burnout reads your Gmail. This page says what it can and can't do, what was checked, what is
 left for you to know, and how to check it yourself.
 
-**Last check:** version 0.3.1, October 21, 2026. Every file of the extension was read line by
-line, with AI help, looking for ways a malicious email, a website, a backup file or an AI server
-could misuse it. What it found is fixed in 0.3.1 (list below). This is not an audit by an outside
+**Last check:** version 0.4.0, October 22, 2026. On October 21 every file of the extension was
+read line by line, with AI help, looking for ways a malicious email, a website, a backup file or an
+AI server could misuse it; on October 22 everything 0.4.0 changed was reviewed the same way, by a
+separate AI reviewer. What they found is fixed (lists below). This is not an audit by an outside
 firm: all the code is here, so anyone can repeat it.
 
 ## In short
@@ -14,8 +15,8 @@ firm: all the code is here, so anyone can repeat it.
   up, and to nothing else: no analytics, no tracking, no error reports, no update checks.
 - **It never sends, deletes or archives email.** It puts a draft in Gmail's reply box. You click
   Send.
-- **Your key and your memory stay on your computer,** in Chrome's storage for this extension.
-  Websites and other extensions can't read it.
+- **Your key, your memory and the emails of yours it keeps stay on your computer,** in Chrome's
+  storage for this extension. Websites and other extensions can't read it.
 - **No code from the internet.** Everything that runs is in this repository. Chrome's rules for
   extensions (Manifest V3) don't let it load code from anywhere else, and it has no `eval`.
 - **No automatic updates.** Nobody can push a change to the copy you installed. You update by
@@ -27,7 +28,7 @@ firm: all the code is here, so anyone can repeat it.
 
 | Permission | What it's for |
 |---|---|
-| `storage`, `unlimitedStorage` | Keeps your settings, profile, memory and the notes of each conversation on your computer. |
+| `storage`, `unlimitedStorage` | Keeps your settings, profile, memory, the emails of yours it learned from and the notes of each conversation on your computer. |
 | `sidePanel` | The Burnout panel next to Gmail. |
 | `scripting` | Puts the Reply with Burnout button into Gmail tabs that were already open when you installed it. |
 | `https://mail.google.com/*` | Reads the open email and puts the reply in the reply box. Burnout runs on no other website. |
@@ -72,9 +73,23 @@ text, never as HTML or code. It can't load an image, open a link or run anything
 the AI you set up. It never goes in a web address, in an error message or in the console. A
 backup leaves it out unless you tick "include the AI key".
 
-**6. The emails it reads to learn.** Learn from my sent mail reads your Sent folder through
-Gmail's own print page, on `mail.google.com`, and sends your AI only what you wrote: the other
-person's messages and the quotes under your replies stay out.
+**6. The emails it reads to learn.** Learn from my sent mail finds your sent conversations with
+searches in your own Gmail tab, reads them through Gmail's own print page, on `mail.google.com`,
+and sends your AI only what you wrote: the other person's messages, the quotes under your replies
+(Gmail's, "> " lines, "On ... wrote:", Outlook's) and forwarded emails stay out. It keeps your part
+of each email in the browser to write like you, without card numbers or the value after "password:"
+or "PIN:", tagged with the Gmail account it came from. A backup leaves those emails out, and
+Settings > Memory deletes them. It downloads at most 200 MB of Gmail pages an hour and 600 MB a
+day, under the limits Google publishes for Gmail on the web (750 MB an hour, 1,250 MB a day), so
+your Gmail keeps working; at the daily limit it stops until the next day. It also stops when you
+close the panel or move around Gmail during the search.
+
+**7. Your emails in a reply.** Each reply gets at most 4 of your saved emails. Up to 2 are ones you
+sent before to the same address: the AI may use what they say, like a memory, and amounts in them
+don't trigger "Check the numbers". Up to 2 more are style samples (to a colleague at the same
+company, or about the same thing), with every number, address and link masked: they are marked as
+style only, never a source of facts. A webmail, a relay (marketplace.amazon.com, one address per
+buyer) or a domain you wrote to more than 8 people at never counts as one company.
 
 ## Fixed in 0.3.1
 
@@ -88,16 +103,35 @@ person's messages and the quotes under your replies stay out.
 - Smaller hardening: Burnout forgets an address it no longer uses, refuses backup files over
   20 MB and checks where each message comes from.
 
+## Fixed in 0.4.0
+
+- An email or a subject written a certain way (`</owner_</owner_email>email>`) could close the box
+  that marks it as data, so the rest of it reached the AI as if it were Burnout's own
+  instructions. It was there since 0.3.1, for the open email too. Now no text can open or close
+  those boxes, however it's spelled (risk 1).
+- In a reply written in Outlook, the email under yours counted as yours when learning (risk 6).
+- Learn could take a client who signs with your first name as one of your own addresses. Now it
+  needs a clear winner across at least 3 conversations, and Settings > Memory lists the addresses it
+  took, with Remove.
+- A fact the AI dated in the future would never leave the memory. Dates are now checked.
+- Changing the AI, deleting everything, or deleting saved emails or memories while Learn runs now
+  stops Learn right away, so nothing comes back and nothing more goes to the old AI.
+
 ## What's left for you to know
 
 - **Read before you send.** The guardrails cut down on steered drafts, but no AI tool can promise
   to stop all of them. With Auto-draft on, drafts appear in Gmail without a click. They still
   don't send.
-- **Check the To line.** If an email fakes its sender, Burnout believes the From line, and Gmail
-  may address your reply to someone else (the email's Reply-To).
-- **Your key is stored without encryption on your computer,** like the rest of Chrome's extension
-  data: anyone who can use your computer account can get it. Set a spending limit on your AI
-  account.
+- **Check the To line.** If an email fakes its sender, Burnout believes the From line: the draft
+  may use what you wrote to that address before, and Gmail may address your reply to someone else
+  (the email's Reply-To). Likewise, a message that fakes your own address inside a conversation you
+  answered counts as yours when learning.
+- **Your key and the emails it keeps are stored without encryption on your computer,** like the
+  rest of Chrome's extension data: anyone who can use your computer account can get them. Set a
+  spending limit on your AI account.
+- **Learn sends a lot of your mail to your AI**: up to thousands of the emails you wrote, with their
+  date, recipient and subject. Use an AI whose terms you accept for that (see the free Gemini plan
+  below).
 - **A backup file is plain text.** With "include the AI key" ticked it holds the key, and without
   it, it still holds pieces of your email. Keep it private.
 - **Google's free Gemini plan** lets Google use and read what you send. For customer email, turn on
@@ -115,7 +149,7 @@ person's messages and the quotes under your replies stay out.
   (your AI) and `content.js` (Gmail's print page).
 - **The permissions.** `extension/manifest.json`, or Details on Burnout's card in
   `chrome://extensions`.
-- **The tests.** `node tests/run.mjs` (62 tests, with one for each risk above) and `python
+- **The tests.** `node tests/run.mjs` (76 tests, with one for each risk above) and `python
   scripts/e2e.py` (the real extension in Chromium on a test Gmail page).
 
 ## Found a problem?

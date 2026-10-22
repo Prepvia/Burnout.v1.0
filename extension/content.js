@@ -101,6 +101,12 @@
   }
 
   // ── Sent folder ─────────────────────────────────────────────────────────
+  function visibleRowCount() {
+    let n = 0;
+    for (const row of document.querySelectorAll(SEL.row)) if (visible(row)) n += 1;
+    return n;
+  }
+
   function visibleRowIds() {
     const ids = [];
     for (const row of document.querySelectorAll(SEL.row)) {
@@ -112,28 +118,61 @@
     return ids;
   }
 
-  // New list = visible rows that differ from the previous ones and stay the same for two
-  // reads in a row (right after switching folders Gmail still shows the old list).
-  async function readNewRows(previousSig, timeoutMs, stop) {
+  // Before each search the rows on screen get a mark: after it, rows with the mark are still the old list.
+  const MARK = 'data-burnout-listed';
+  function markRows() {
+    for (const row of document.querySelectorAll(SEL.row)) if (visible(row)) row.setAttribute(MARK, '1');
+  }
+
+  // The list after a search: rows that differ from the previous list and stay the same for two
+  // reads in a row (right after a search Gmail still shows the old list). The same conversations in
+  // new rows, for the whole wait, count too: that period holds the same ones as the period before.
+  // No rows for the whole wait: nothing in this period. Still the old rows (marked) after the wait:
+  // Gmail didn't run the search, so nothing is known about this period (null).
+  async function readRows(previousSig, stop, timeoutMs = 7000) {
     const t0 = Date.now();
     await sleep(900);
-    let last = '';
-    while (Date.now() - t0 < timeoutMs && !stop()) {
+    let last = null;
+    while (!stop()) {
       const ids = visibleRowIds();
       const sig = ids.join(',');
       if (ids.length && sig !== previousSig && sig === last) return ids;
+      if (Date.now() - t0 >= timeoutMs) {
+        const rows = [...document.querySelectorAll(SEL.row)].filter(visible);
+        if (rows.length && rows.every((row) => row.getAttribute(MARK))) return null;
+        return ids;
+      }
       last = sig;
       await sleep(300);
     }
     return [];
   }
 
-  // Today's Gmail doesn't open page 2 by address (#sent/p2 comes up empty, checked
-  // Oct 17). Instead of pages, search by period: each search brings up to 50
-  // conversations and learning still covers the whole year, not just the last month.
-  // Search operators are the same in every Gmail language.
-  const SENT_WINDOWS = ['newer_than:7d', 'older_than:7d newer_than:30d', 'older_than:30d newer_than:90d',
-    'older_than:90d newer_than:180d', 'older_than:180d newer_than:1y', 'older_than:1y newer_than:2y', 'older_than:2y'];
+  // Today's Gmail doesn't open page 2 by address (#sent/p2 comes up empty, checked Oct 17).
+  // Instead of pages, it searches the Sent folder period by period, newest first, with the
+  // date format Gmail documents (in:sent after:2026/9/1 before:2026/10/1, the same in every
+  // language). A period whose results fill a whole page may hide more, so it is cut in half
+  // until each part fits; quiet periods make the next one longer. A single day can't be cut:
+  // a day with more conversations than a page gives its newest page.
+  const PAGE_SIZES = [10, 15, 20, 25, 50, 100]; // Gmail's "Maximum page size" choices
+  const DAY_MS = 86400000;
+  const GMAIL_START = 12418; // 2004-01-01: there is no sent mail before Gmail
+  const SPAN_START = 30;
+  const SPAN_MAX = 730;
+
+  // days since 1970-01-01 -> 'YYYY/M/D' (civil-from-days, no Date object needed)
+  function ymd(day) {
+    let z = Math.floor(day) + 719468;
+    const era = Math.floor(z / 146097);
+    const doe = z - era * 146097;
+    const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+    const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+    const mp = Math.floor((5 * doy + 2) / 153);
+    const d = doy - Math.floor((153 * mp + 2) / 5) + 1;
+    const m = mp < 10 ? mp + 3 : mp - 9;
+    z = yoe + era * 400 + (m <= 2 ? 1 : 0);
+    return `${z}/${m}/${d}`;
+  }
 
   function searchHash(query) {
     return '#search/' + encodeURIComponent(query).replace(/%20/g, '+');
@@ -141,39 +180,91 @@
 
   let listCancel = false;
 
-  // location.replace: the searches stay out of the browser's Back. If the person moves
-  // around Gmail midway, it stops right away and doesn't pull them back.
-  async function listSent(max) {
+  /**
+   * Lists conversations of the Sent folder, newest first, from the day before `to` (days since
+   * 1970, exclusive; default: past today) down to `from` (inclusive; default: the oldest one),
+   * until there are `max` of them. Returns { ids, days: {id: day it showed up}, lo: the oldest day
+   * fully gone through, end: reached `from` or there is nothing older, cancelled, moved }.
+   * location.replace: the searches stay out of the browser's Back. If the person moves around
+   * Gmail midway, it stops right away and doesn't pull them back.
+   */
+  async function listSent({ max, to, from } = {}) {
     listCancel = false;
-    const limit = Math.max(1, Math.min(Number(max) || 60, 400));
+    const limit = Math.max(1, Math.min(Math.floor(Number(max)) || 60, 20000));
+    const floor = Math.max(GMAIL_START, Math.floor(Number(from)) || 0);
+    let hi = Math.floor(Number(to)) || Math.floor(Date.now() / DAY_MS) + 2;
     const original = location.hash;
     const ids = [];
+    const days = {};
+    let span = SPAN_START;
+    let end = false;
+    let moved = false;
+    let stale = false;
     let previousSig = visibleRowIds().join(',');
     let expected = original;
-    let moved = false;
     const stop = () => listCancel || location.hash !== expected;
-    try {
-      for (const period of SENT_WINDOWS) {
-        if (ids.length >= limit || listCancel) break;
-        if (location.hash !== expected) {
-          moved = true;
-          break;
-        }
-        expected = searchHash('in:sent ' + period);
-        location.replace(expected);
-        const got = await readNewRows(previousSig, 7000, stop); // a period with no email: wait, then move on
-        if (location.hash !== expected) {
-          moved = true;
-          break;
-        }
-        if (!got.length) continue;
-        previousSig = got.join(',');
-        for (const id of got) if (!ids.includes(id)) ids.push(id);
+    const search = async (query) => {
+      if (location.hash !== expected) {
+        moved = true;
+        return null;
       }
+      expected = searchHash(query);
+      markRows();
+      location.replace(expected);
+      const got = await readRows(previousSig, stop);
+      if (location.hash !== expected) {
+        moved = true;
+        return null;
+      }
+      if (!got) {
+        stale = true;
+        return null;
+      }
+      previousSig = got.join(',');
+      return got;
+    };
+    try {
+      while (ids.length < limit && hi > floor && !listCancel) {
+        const lo = Math.max(floor, hi - span);
+        const got = await search(`in:sent after:${ymd(lo)} before:${ymd(hi)}`);
+        if (!got || listCancel) break;
+        // rows, not conversations: with conversation view off, a page of 50 messages can be 30 conversations
+        if (PAGE_SIZES.includes(Math.max(got.length, visibleRowCount())) && hi - lo > 1) {
+          span = Math.ceil((hi - lo) / 2); // a full page may hide more: cut the period in half
+          continue;
+        }
+        for (const id of got) {
+          if (days[id] !== undefined) continue;
+          days[id] = hi - 1;
+          ids.push(id);
+        }
+        hi = lo;
+        let ack = null;
+        try {
+          ack = await chrome.runtime.sendMessage({ type: 'jm:listProgress', n: ids.length, day: hi });
+        } catch (e) {
+          ack = null;
+        }
+        if (!ack || !ack.listening) {
+          listCancel = true;
+          break;
+        }
+        if (got.length >= 10) continue;
+        span = Math.min(span * 2, SPAN_MAX);
+        if (got.length || hi <= floor) continue;
+        // nothing in this period: is there anything older at all?
+        const older = await search(floor ? `in:sent after:${ymd(floor)} before:${ymd(hi)}` : `in:sent before:${ymd(hi)}`);
+        if (!older || listCancel) break;
+        if (!older.length) {
+          end = true;
+          break;
+        }
+      }
+      if (hi <= floor) end = true;
     } finally {
       if (!moved && location.hash === expected && location.hash !== original) location.replace(original || '#inbox');
     }
-    return { ids: ids.slice(0, limit), cancelled: listCancel, moved };
+    return { ids, days, lo: hi, end, cancelled: listCancel, moved, stale };
   }
 
   // ── Reply box ───────────────────────────────────────────────────────────
@@ -352,7 +443,7 @@
       }
     },
     'jm:printThread': async (msg) => ({ ok: true, html: await fetchPrint(msg.id) }),
-    'jm:listSent': async (msg) => ({ ok: true, ...(await listSent(msg.max)), me: myEmail() }),
+    'jm:listSent': async (msg) => ({ ok: true, ...(await listSent({ max: msg.max, to: msg.to, from: msg.from })), me: myEmail() }),
     'jm:cancel': async () => {
       listCancel = true;
       return { ok: true };

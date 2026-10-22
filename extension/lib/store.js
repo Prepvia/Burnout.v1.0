@@ -2,16 +2,21 @@
 // Nothing goes to any server. Backup = a JSON file they download and can import
 // back (on the same computer or another one).
 
-import { localDate, localMonth, oneLine } from './text.js';
+import { keywords, localDate, localMonth, oneLine } from './text.js';
 
-export const MEMORY_MAX = { manual: 60, learned: 120 };
+// Each reply only gets the memory that matters for the open email, so the lists can be long.
+export const MEMORY_MAX = { manual: 300, learned: 3000 };
+// The owner's own emails kept to write like them (their part only): a few MB in the browser.
+export const VOICE_MAX = 3000;
+const VOICE_TEXT = 1200;
 export const NOTES_PER_THREAD = 10;
 const CHAT_TURNS = 10;
 const CHAT_ANSWER_MAX = 4000;
 export const NOTE_THREADS_KEPT = 200;
 const SUBJECT_MAX = 200;
 const CHAT_THREADS_KEPT = 100;
-const SEEN_KEPT = 2000;
+const SEEN_KEPT = 50000;
+const PENDING_KEPT = 20000;
 const ALIASES_MAX = 20;
 const AUTO_DRAFTS_KEPT = 500;
 export const BACKUP_KIND = 'burnout-backup';
@@ -25,7 +30,10 @@ export const DEFAULTS = {
   profile: { name: '', about: '', services: '', hours: '', booking: '', signature: '', never: '', tone: '', emails: '' },
   memory: [],
   style: { summary: '', examples: [], learnedAt: '', emails: 0 },
-  learn: { seen: [], lastRun: '', lastCount: 0 },
+  // seen = conversations already learned; pending = [id, day] listed but not learned yet;
+  // range = the stretch of the Sent folder already listed, in days since 1970 ({ hi, lo, end })
+  // bytes = [hour, bytes] Learn downloaded from Gmail in the last 24 hours (it stays under Gmail's limits)
+  learn: { seen: [], lastRun: '', lastCount: 0, pending: [], range: null, bytes: [] },
   identity: { aliases: [] },
   notes: {},
   chats: {},
@@ -96,6 +104,14 @@ export function ownAddresses(state, account = '') {
   return [...out];
 }
 
+export async function removeAlias(email) {
+  const { identity } = await load(['identity']);
+  const drop = String(email || '').trim().toLowerCase();
+  const aliases = (Array.isArray(identity.aliases) ? identity.aliases : []).filter((a) => a !== drop);
+  await save({ identity: { ...identity, aliases } });
+  return aliases;
+}
+
 export async function addAliases(emails) {
   const { identity } = await load(['identity']);
   const set = new Set(Array.isArray(identity.aliases) ? identity.aliases : []);
@@ -116,32 +132,99 @@ function newId() {
 
 // Same text ignoring case and punctuation; but the separator between digits counts ($1.50 is not $15.0).
 const norm = (s) => oneLine(s, 400).toLowerCase().replace(/(?<=\d)[.,](?=\d)/g, '#').replace(/[^\p{L}\p{N}# ]/gu, '');
+const numbersOf = (s) => (oneLine(s, 400).match(/\d[\d.,]*/g) || []).map((n) => n.replace(/[.,]+$/, '')).sort().join(' ');
+const kindOf = (m) => (m.source === 'learned' ? 'learned' : 'manual');
+
+function scopeOf(contact) {
+  const who = String(contact || '').trim().toLowerCase();
+  return EMAIL_RE.test(who) ? who : '';
+}
+
+const factKey = (text) => ({ n: norm(text), k: keywords(text), nums: numbersOf(text) });
+
+/** The same fact in other words: the same numbers and almost the same words ($1.40 and $1.50 are two facts). */
+function sameFact(a, b) {
+  if (a.n === b.n) return true;
+  if (a.nums !== b.nums || a.k.size < 3 || b.k.size < 3) return false;
+  let both = 0;
+  for (const w of a.k) if (b.k.has(w)) both += 1;
+  return both / (a.k.size + b.k.size - both) >= 0.8;
+}
+
+/** Over the limit: the learned facts from the oldest emails leave first (manual ones never leave on their own). */
+function trimLearned(memory) {
+  const learned = memory.map((m, i) => ({ m, i })).filter((x) => kindOf(x.m) === 'learned');
+  const extra = learned.length - MEMORY_MAX.learned;
+  if (extra <= 0) return memory;
+  learned.sort((a, b) => String(a.m.date || '').localeCompare(String(b.m.date || '')) || a.i - b.i);
+  const drop = new Set(learned.slice(0, extra).map((x) => x.m));
+  return memory.filter((m) => !drop.has(m));
+}
 
 /**
  * Saves a memory. contact = one person's email: the memory only goes into replies to
  * them ("Sarah wants the invoice as a PDF"). Returns the saved item, or { dup: true }
- * when it already existed (with the same scope), or { full: true } when that kind's
- * list is full.
+ * when it already existed (with the same scope), or { full: true } when the list of what
+ * the person taught is full.
  */
 export async function addMemory(text, { source = 'manual', date = localDate(), contact = '' } = {}) {
   const clean = oneLine(text, 400);
   if (!clean) return null;
   const kind = source === 'learned' ? 'learned' : 'manual';
-  const who = String(contact || '').trim().toLowerCase();
-  const scope = EMAIL_RE.test(who) ? who : '';
+  const scope = scopeOf(contact);
   const { memory } = await load(['memory']);
   if (memory.some((m) => norm(m.text) === norm(clean) && (m.contact || '') === scope)) return { dup: true };
-  const sameKind = memory.filter((m) => (m.source === 'learned' ? 'learned' : 'manual') === kind);
-  if (sameKind.length >= MEMORY_MAX[kind]) {
-    if (kind !== 'learned') return { full: true };
-    // the oldest learned fact makes room for the new one (manual ones never leave on their own)
-    memory.splice(memory.indexOf(sameKind[0]), 1);
-  }
+  if (kind === 'manual' && memory.filter((m) => kindOf(m) === 'manual').length >= MEMORY_MAX.manual) return { full: true };
   const item = { id: newId(), text: clean, date: String(date || localDate()).slice(0, 10), source: kind };
   if (scope) item.contact = scope;
   memory.push(item);
-  await save({ memory });
+  await save({ memory: trimLearned(memory) });
   return item;
+}
+
+/**
+ * Saves many learned facts at once, with one read and one write: [{ text, date, contact }].
+ * A fact that is already there, in the same or other words, doesn't come in twice; when it
+ * shows up again in a newer email, the one already there takes the newer date (it is still
+ * true). Returns how many new facts stayed.
+ */
+export async function addMemories(items, { source = 'learned' } = {}) {
+  const kind = source === 'learned' ? 'learned' : 'manual';
+  const { memory } = await load(['memory']);
+  const byScope = new Map();
+  const index = (m) => {
+    const s = m.contact || '';
+    if (!byScope.has(s)) byScope.set(s, []);
+    byScope.get(s).push({ m, ...factKey(m.text) });
+  };
+  memory.forEach(index);
+  const fresh = [];
+  let changed = false;
+  for (const it of items || []) {
+    const clean = oneLine(it && it.text, 400);
+    if (!clean) continue;
+    const scope = scopeOf(it.contact);
+    const date = DAY_RE.test(String(it.date || '')) && it.date <= localDate() ? it.date : localDate();
+    const key = factKey(clean);
+    const same = (byScope.get(scope) || []).find((x) => sameFact(x, key));
+    if (same) {
+      if (kindOf(same.m) === 'learned' && date > String(same.m.date || '')) {
+        same.m.date = date;
+        changed = true;
+      }
+      continue;
+    }
+    const item = { id: newId(), text: clean, date, source: kind };
+    if (scope) item.contact = scope;
+    memory.push(item);
+    index(item);
+    fresh.push(item);
+  }
+  if (!fresh.length && !changed) return 0;
+  const kept = trimLearned(memory);
+  await save({ memory: kept });
+  const stayed = new Set(kept);
+  return fresh.filter((m) => stayed.has(m)).length;
 }
 
 export async function removeMemory(ids) {
@@ -278,13 +361,93 @@ export async function bumpUsage(usage) {
   }
 }
 
+/** Conversations Learn finished: they leave the waiting list and are never read again. */
 export async function markSeen(ids) {
   if (!ids || !ids.length) return;
   const { learn } = await load(['learn']);
   const seen = new Set(learn.seen);
   for (const id of ids) seen.add(id);
   learn.seen = [...seen].slice(-SEEN_KEPT);
+  const done = new Set(ids);
+  learn.pending = (Array.isArray(learn.pending) ? learn.pending : []).filter((p) => !done.has(Array.isArray(p) ? p[0] : p));
   await save({ learn });
+}
+
+/** What Learn downloaded from Gmail ({ t, n } in ms and bytes), kept by hour for the last 24 hours. */
+export async function saveLearnBytes(events) {
+  const since = Date.now() - 24 * 3600000;
+  const byHour = new Map();
+  for (const e of events || []) {
+    if (!(e && e.t >= since && e.n > 0)) continue;
+    const hour = Math.floor(e.t / 3600000) * 3600000;
+    byHour.set(hour, (byHour.get(hour) || 0) + e.n);
+  }
+  const { learn } = await load(['learn']);
+  learn.bytes = [...byHour].sort((a, b) => a[0] - b[0]);
+  await save({ learn });
+}
+
+/**
+ * What the Sent folder listing found: the conversations waiting to be learned ([id, day]) and
+ * the stretch of the folder already gone through, so the next Learn picks up from there.
+ */
+export async function saveLearnPlan({ pending, range, account = '' }) {
+  const { learn } = await load(['learn']);
+  learn.account = String(account || '').toLowerCase();
+  learn.pending = (Array.isArray(pending) ? pending : [])
+    .filter((p) => Array.isArray(p) && THREAD_RE.test(String(p[0])))
+    .map(([id, day]) => [id, Number.isFinite(Number(day)) ? Math.floor(Number(day)) : 0])
+    .slice(0, PENDING_KEPT);
+  learn.range = range && Number.isFinite(range.hi) && Number.isFinite(range.lo) ? { hi: range.hi, lo: range.lo, end: !!range.end } : null;
+  await save({ learn });
+}
+
+// ── The owner's own emails, to write like them ──────────────────────────
+// Kept apart from the rest: it is big, only the replies and Learn use it, and a backup
+// leaves it out (on another computer, Learn fills it again). Each one:
+// { t: conversation, d: 'YYYY-MM-DD' ('' when unknown), to: [addresses], s: subject, x: the owner's text }.
+const ADDRESSES_IN = /[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+
+export async function loadVoice() {
+  const got = await area().get(['voice']);
+  return Array.isArray(got.voice) ? got.voice : [];
+}
+
+/**
+ * Adds the owner's emails ({ threadId, date, to, subject, text }) from one Gmail account. Over the
+ * limit, the oldest leave. Returns how many came in.
+ */
+export async function addVoice(emails, { account = '' } = {}) {
+  const acct = EMAIL_RE.test(String(account || '').toLowerCase()) ? String(account).toLowerCase() : '';
+  const voice = await loadVoice();
+  const key = (v) => v.t + ':' + oneLine(v.x, 80);
+  const have = new Set(voice.map(key));
+  let added = 0;
+  for (const e of emails || []) {
+    const x = String((e && e.text) || '').replace(/\r\n/g, '\n').trim().slice(0, VOICE_TEXT);
+    if (x.length < 40) continue;
+    const item = { t: String(e.threadId || ''), d: DAY_RE.test(String(e.date || '')) ? e.date : '',
+      to: [...new Set((String(e.to || '').match(ADDRESSES_IN) || []).map((a) => a.toLowerCase()))].slice(0, 20),
+      s: oneLine(e.subject, SUBJECT_MAX), x };
+    if (acct) item.a = acct;
+    if (have.has(key(item))) continue;
+    have.add(key(item));
+    voice.push(item);
+    added += 1;
+  }
+  if (!added) return 0;
+  let kept = voice;
+  if (voice.length > VOICE_MAX) {
+    const keep = new Set(voice.map((v, i) => ({ v, i })).sort((a, b) => String(b.v.d).localeCompare(String(a.v.d)) || b.i - a.i)
+      .slice(0, VOICE_MAX).map((x) => x.v));
+    kept = voice.filter((v) => keep.has(v));
+  }
+  await save({ voice: kept });
+  return added;
+}
+
+export async function clearVoice() {
+  await save({ voice: [] });
 }
 
 // ── Backup ──────────────────────────────────────────────────────────────
@@ -399,13 +562,15 @@ async function planImport(data, mode) {
 
   const incoming = (Array.isArray(data.memory) ? data.memory : []).filter((m) => isObj(m) && typeof m.text === 'string' && m.text.trim());
   const memory = restore ? [] : cur.memory.slice();
+  const have = new Set(memory.map((x) => norm(x.text) + '|' + (x.contact || '')));
   let added = 0;
   let scoped = 0;
   for (const m of incoming) {
-    const who = String(m.contact || '').trim().toLowerCase();
-    const contact = EMAIL_RE.test(who) ? who : '';
-    if (memory.some((x) => norm(x.text) === norm(m.text) && (x.contact || '') === contact)) continue;
-    const item = { id: newId(), text: oneLine(m.text, 400), date: DAY_RE.test(m.date) ? m.date : '', source: m.source === 'learned' ? 'learned' : 'manual' };
+    const contact = scopeOf(m.contact);
+    const key = norm(m.text) + '|' + contact;
+    if (have.has(key)) continue;
+    have.add(key);
+    const item = { id: newId(), text: oneLine(m.text, 400), date: DAY_RE.test(m.date) && m.date <= localDate() ? m.date : '', source: m.source === 'learned' ? 'learned' : 'manual' };
     if (contact) {
       item.contact = contact;
       scoped += 1;
@@ -414,8 +579,7 @@ async function planImport(data, mode) {
     added += 1;
   }
   const manual = memory.filter((m) => m.source !== 'learned').slice(-MEMORY_MAX.manual);
-  const learned = memory.filter((m) => m.source === 'learned').slice(-MEMORY_MAX.learned);
-  out.memory = [...manual, ...learned];
+  out.memory = trimLearned([...manual, ...memory.filter((m) => m.source === 'learned')]);
 
   if (restore) {
     const aliases = isObj(data.identity) && Array.isArray(data.identity.aliases) ? data.identity.aliases : [];

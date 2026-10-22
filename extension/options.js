@@ -18,6 +18,10 @@ let busy = ''; // 'test' | 'models'
 let note = null; // { kind, text } of the current screen
 let draft = null; // the AI being set up
 let shortcut = '';
+let voiceCount = 0; // the owner's emails kept to write like them (loaded apart: only the count is shown)
+let memQuery = ''; // the Memory tab's search
+let memAll = false; // "Show all" clicked
+const MEM_SHOWN = 100;
 
 const STEPS = { gemini: 'stepsGemini', openai: 'stepsOpenai', anthropic: 'stepsAnthropic' };
 const NOTES = { gemini: 'noteGemini', openai: 'noteOpenai', anthropic: 'noteAnthropic' };
@@ -43,6 +47,7 @@ function providerName(id, preset) {
 
 async function load() {
   S = await store.load();
+  voiceCount = (await store.loadVoice()).length;
   document.title = t('appName');
   if (!draft) draft = draftFrom(S.settings);
 }
@@ -390,13 +395,37 @@ function doneSection() {
 }
 
 // ── Memory and backup ───────────────────────────────────────────────────
+// A long list shows the first 100 that match the search; "Show all" shows the rest.
 function memoryList(items) {
   if (!items.length) return h('div', { class: 'list' }, h('div', { class: 'empty' }, t('memNone')));
-  return h('div', { class: 'list' }, items.map((m) =>
+  const q = memQuery.trim().toLowerCase();
+  const found = q ? items.filter((m) => (m.text + ' ' + (m.contact || '')).toLowerCase().includes(q)) : items;
+  const shown = memAll ? found : found.slice(0, MEM_SHOWN);
+  const out = [h('div', { class: 'list' }, shown.length ? shown.map((m) =>
     h('label', { class: 'mem-item' },
       h('input', { type: 'checkbox', 'data-mem': m.id }),
       h('span', { class: 'mem-text' }, m.text, m.contact ? h('span', { class: 'mem-for' }, t('memFor', { who: m.contact })) : null),
-      h('span', { class: 'mem-meta' }, m.date || ''))));
+      h('span', { class: 'mem-meta' }, m.date || ''))) : h('div', { class: 'empty' }, t('memNone')))];
+  if (shown.length < found.length) {
+    out.push(h('div', { class: 'row', style: 'margin-top:6px' },
+      h('span', { class: 'muted small' }, t('memShowing', { shown: shown.length.toLocaleString('en-US'), n: found.length.toLocaleString('en-US') })),
+      h('button', { class: 'btn ghost sm', type: 'button', onclick: () => { memAll = true; render(); } }, t('memShowAll'))));
+  }
+  return out;
+}
+
+// The search redraws the tab; the cursor goes back to the search box, at the end.
+function memorySearch() {
+  return h('input', { type: 'search', 'data-memsearch': '1', placeholder: t('memSearch'), 'aria-label': t('memSearch'), value: memQuery,
+    oninput: (e) => {
+      memQuery = e.target.value;
+      render();
+      const box = app.querySelector('[data-memsearch]');
+      if (box) {
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+      }
+    } });
 }
 
 // Conversation notes: what the person asked for with Redo, grouped by conversation, newest
@@ -430,7 +459,9 @@ function notesSection() {
 
 function memorySection() {
   const manual = S.memory.filter((m) => m.source !== 'learned');
-  const learned = S.memory.filter((m) => m.source === 'learned');
+  // newest first: with thousands of facts, the recent ones are the ones people look for
+  const learned = S.memory.filter((m) => m.source === 'learned').map((m, i) => ({ m, i }))
+    .sort((a, b) => String(b.m.date || '').localeCompare(String(a.m.date || '')) || b.i - a.i).map((x) => x.m);
   const add = h('input', { type: 'text', placeholder: t('memAddHint'), 'aria-label': t('memAddHint') });
   const withKey = h('input', { type: 'checkbox', onchange: (e) => {
     const warn = document.getElementById('keywarn');
@@ -451,9 +482,29 @@ function memorySection() {
         h('div', null, h('h2', null, t('memTitle')), h('p', { class: 'muted' }, t('memText')))),
       h('div', { class: 'row nowrap', style: 'margin-top:14px' }, add,
         h('button', { class: 'btn primary', onclick: saveMem }, icon('plus', 14), t('memAdd'))),
+      S.memory.length > 20 ? h('div', { style: 'margin-top:14px' }, memorySearch()) : null,
       h('label', null, `${t('memManual')} (${manual.length}/${store.MEMORY_MAX.manual})`), memoryList(manual),
-      h('label', null, `${t('memLearned')} (${learned.length}/${store.MEMORY_MAX.learned})`), memoryList(learned),
+      h('label', null, `${t('memLearned')} (${learned.length.toLocaleString('en-US')}/${store.MEMORY_MAX.learned.toLocaleString('en-US')})`), memoryList(learned),
       h('div', { class: 'field-hint' }, t('memLearnedHint')),
+      (S.identity.aliases || []).length ? [h('label', null, t('memAliases')), h('div', { class: 'field-hint' }, t('memAliasesHint')),
+        h('div', { class: 'list' }, S.identity.aliases.map((a) => h('div', { class: 'mem-item' },
+          h('span', { class: 'mem-text' }, a),
+          h('button', { class: 'btn ghost sm', type: 'button', 'aria-label': `${t('memAliasRemove')}: ${a}`, onclick: async () => {
+            await store.removeAlias(a);
+            toast(t('memDeleted'));
+            await load();
+            render();
+          } }, icon('trash', 13), t('memAliasRemove')))))] : null,
+      h('label', null, t('memVoice', { n: voiceCount.toLocaleString('en-US') })),
+      h('div', { class: 'field-hint' }, t('memVoiceHint')),
+      voiceCount ? h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', { class: 'btn ghost sm', type: 'button', onclick: async () => {
+          if (!window.confirm(t('memVoiceConfirm'))) return;
+          await store.clearVoice();
+          toast(t('memVoiceCleared'));
+          await load();
+          render();
+        } }, icon('trash', 13), t('memVoiceClear'))) : null,
       S.style.summary ? [h('label', null, t('learnedStyle')), h('p', { class: 'small result muted' }, S.style.summary)] : null,
       h('div', { class: 'actions' },
         h('button', { class: 'btn danger', onclick: async () => {
@@ -597,7 +648,9 @@ window.addEventListener('focus', () => {
 });
 
 chrome.storage.onChanged.addListener(async (changes, area) => {
-  if (area === 'local' && (changes.memory || changes.style || changes.notes) && tab === 'memory' && S && S.onboarded) {
+  if (area === 'local' && (changes.memory || changes.style || changes.notes || changes.voice) && tab === 'memory' && S && S.onboarded) {
+    // Learn running in the panel changes the memory every few seconds: don't take the cursor from the search box
+    if (document.activeElement && document.activeElement.matches && document.activeElement.matches('[data-memsearch]')) return;
     await load();
     render();
   }

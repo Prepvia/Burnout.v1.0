@@ -20,7 +20,8 @@ const PROVIDER_IDS = ['gemini', 'openai', 'anthropic', 'compatible', 'custom'];
 const KEYLESS = ['compatible', 'custom']; // a self-hosted server may not need a key
 
 export const DEFAULTS = {
-  settings: { provider: 'gemini', apiKey: '', model: '', baseUrl: '', preset: '' },
+  // unconfirmed = the AI came from a backup file and the person hasn't clicked Test and save yet
+  settings: { provider: 'gemini', apiKey: '', model: '', baseUrl: '', preset: '', unconfirmed: false },
   profile: { name: '', about: '', services: '', hours: '', booking: '', signature: '', never: '', tone: '', emails: '' },
   memory: [],
   style: { summary: '', examples: [], learnedAt: '', emails: 0 },
@@ -59,10 +60,19 @@ export async function save(partial) {
   await area().set(partial);
 }
 
-/** The AI is connected: it has a key, or it's a self-hosted server with an address (Ollama needs no key). */
+/** The AI has what it needs: a key, or an address for a self-hosted server (Ollama needs no key). */
+function hasAi(s) {
+  return !!(String(s.apiKey || '').trim() || (KEYLESS.includes(s.provider) && String(s.baseUrl || '').trim()));
+}
+
+/**
+ * The AI is connected: it has what it needs and the person set it up here. An AI that came in a
+ * backup file waits for Test and save, so a file can never send someone's email to a server
+ * they didn't pick themselves.
+ */
 export function connected(settings) {
   const s = settings || {};
-  return !!(String(s.apiKey || '').trim() || (KEYLESS.includes(s.provider) && String(s.baseUrl || '').trim()));
+  return !s.unconfirmed && hasAi(s);
 }
 
 export function isReady(state) {
@@ -349,33 +359,57 @@ function cleanThreads(map, key, max) {
 
 /**
  * Imports a backup.
- *   'merge' (Memory tab): adds to the memory; profile and style only fill what is empty;
- *           the backup's AI only comes in if no AI is connected here yet.
+ *   'merge' (Memory tab): adds to the memory; profile and style only fill what is empty.
+ *           Someone else's file never brings their own email addresses.
  *   'restore' (new computer): the backup becomes all of Burnout (profile, memory, style,
- *           notes, chats and the AI, when the file has it).
+ *           notes, chats and your addresses).
+ * The file's AI only comes in when no AI is connected here, and even then it waits for Test
+ * and save (connected() is false until then). Auto-draft never comes from a file.
  * Every field is checked: a hand-edited file doesn't break the replies. Backups saved
  * before the rename import the same way.
  * Returns { added, restored }: memories that came in and whether the AI came along.
  */
 export async function importBackup(data, { mode = 'merge' } = {}) {
+  const plan = await planImport(data, mode);
+  await save(plan.out);
+  return { added: plan.added, restored: !!plan.ai };
+}
+
+/**
+ * What importing the file would change, without saving anything, so the screen can ask first:
+ * { added, scoped (memories only for one person), profile (fields that change), ai (or null),
+ *   addresses (new ones that would count as yours: only a restore brings them) }.
+ */
+export async function previewBackup(data, { mode = 'merge' } = {}) {
+  const { added, scoped, profile, ai, addresses } = await planImport(data, mode);
+  return { added, scoped, profile, ai, addresses };
+}
+
+async function planImport(data, mode) {
   if (!isObj(data) || data.kind !== BACKUP_KIND) throw new Error('not_a_backup');
   const restore = mode === 'restore';
   const cur = await load();
   const out = {};
   const profile = cleanProfile(data.profile);
+  if (!restore) delete profile.emails; // the addresses of whoever made the file are not yours
   out.profile = restore ? { ...DEFAULTS.profile, ...profile } : { ...profile, ...nonEmpty(cur.profile) };
+  const changed = Object.keys(DEFAULTS.profile).filter((k) => String(out.profile[k] || '').trim() && out.profile[k] !== cur.profile[k]);
   const style = cleanStyle(data.style);
   if (style && (restore || !cur.style.summary)) out.style = style;
 
   const incoming = (Array.isArray(data.memory) ? data.memory : []).filter((m) => isObj(m) && typeof m.text === 'string' && m.text.trim());
   const memory = restore ? [] : cur.memory.slice();
   let added = 0;
+  let scoped = 0;
   for (const m of incoming) {
     const who = String(m.contact || '').trim().toLowerCase();
     const contact = EMAIL_RE.test(who) ? who : '';
     if (memory.some((x) => norm(x.text) === norm(m.text) && (x.contact || '') === contact)) continue;
     const item = { id: newId(), text: oneLine(m.text, 400), date: DAY_RE.test(m.date) ? m.date : '', source: m.source === 'learned' ? 'learned' : 'manual' };
-    if (contact) item.contact = contact;
+    if (contact) {
+      item.contact = contact;
+      scoped += 1;
+    }
     memory.push(item);
     added += 1;
   }
@@ -383,24 +417,22 @@ export async function importBackup(data, { mode = 'merge' } = {}) {
   const learned = memory.filter((m) => m.source === 'learned').slice(-MEMORY_MAX.learned);
   out.memory = [...manual, ...learned];
 
-  const aliases = isObj(data.identity) && Array.isArray(data.identity.aliases) ? data.identity.aliases : [];
-  const knownAliases = Array.isArray(cur.identity.aliases) ? cur.identity.aliases : [];
-  out.identity = { aliases: [...new Set([...(restore ? [] : knownAliases), ...aliases.filter((e) => EMAIL_RE.test(String(e)))]
-    .map((e) => String(e).toLowerCase()))].slice(0, ALIASES_MAX) };
   if (restore) {
-    if (typeof data.autoDraft === 'boolean') out.autoDraft = data.autoDraft;
+    const aliases = isObj(data.identity) && Array.isArray(data.identity.aliases) ? data.identity.aliases : [];
+    out.identity = { aliases: [...new Set(aliases.filter((e) => EMAIL_RE.test(String(e))).map((e) => String(e).toLowerCase()))].slice(0, ALIASES_MAX) };
     out.notes = cleanThreads(data.notes, 'items', NOTE_THREADS_KEPT);
     out.chats = cleanThreads(data.chats, 'turns', CHAT_THREADS_KEPT);
   }
   const settings = cleanSettings(data.settings);
-  let restored = false;
-  if (settings && connected(settings) && (restore || !connected(cur.settings))) {
-    out.settings = { ...cur.settings, ...settings };
-    restored = true;
+  let ai = null;
+  if (settings && hasAi(settings) && !connected(cur.settings)) {
+    out.settings = { ...cur.settings, ...settings, unconfirmed: true };
+    ai = { provider: settings.provider, preset: settings.preset, baseUrl: settings.baseUrl.split('?')[0], key: !!settings.apiKey };
   }
   if (restore && isReady({ settings: out.settings || cur.settings, profile: out.profile })) out.onboarded = true;
-  await save(out);
-  return { added, restored };
+  const before = new Set(ownAddresses(cur));
+  const addresses = restore ? ownAddresses({ profile: out.profile, identity: out.identity }).filter((e) => !before.has(e)) : [];
+  return { out, added, scoped, profile: changed, ai, addresses };
 }
 
 function nonEmpty(obj) {

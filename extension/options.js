@@ -216,6 +216,7 @@ function aiSection(wizard) {
       h('button', { class: 'btn ghost sm', type: 'button', onclick: () => { draft.show = !draft.show; render(); } },
         icon(draft.show ? 'eyeOff' : 'eye', 14), draft.show ? t('hideKey') : t('showKey'))),
     h('div', { id: 'detected' }, detectedLine()),
+    S.settings.unconfirmed ? h('div', { style: 'margin-top:12px' }, noteBox('warn', 'alert', t('aiFromBackup', aiWhere(S.settings)))) : null,
     h('label', null, t('providerLabel')),
     h('div', { class: 'tiles' }, TILES.map(tileEl)),
     ...providerDetails(p),
@@ -251,8 +252,10 @@ async function saveAi() {
   render();
   try {
     const used = await testKey(conf);
-    S.settings = { ...S.settings, ...conf, preset: p.id === 'compatible' ? draft.preset : '' };
+    const prev = S.settings;
+    S.settings = { ...S.settings, ...conf, preset: p.id === 'compatible' ? draft.preset : '', unconfirmed: false };
     await store.save({ settings: S.settings });
+    forgetOldAddress(prev, conf);
     const name = shortName(conf) || providerName(p.id, draft.preset);
     note = { kind: 'ok', text: t('keyOk', { name: used && used !== name ? `${name} (${used})` : name }) };
     if (!S.onboarded && step === 1) {
@@ -264,6 +267,24 @@ async function saveAi() {
   }
   busy = '';
   render();
+}
+
+// The address it talked to before (Other AI, Company AI) stops being allowed: only the current one is.
+function forgetOldAddress(prev, now) {
+  const old = PROVIDERS[prev && prev.provider];
+  const before = old && old.needsUrl ? originFor(prev) : '';
+  if (!before || before === originFor(now)) return;
+  try {
+    chrome.permissions.remove({ origins: [before] }).catch(() => {});
+  } catch (e) {
+    // no permissions API (preview outside the extension)
+  }
+}
+
+// "Company AI (https://ai.example.com/burnout)": what the screen names when an AI came from a file.
+function aiWhere(s) {
+  const url = String((s && s.baseUrl) || '').split('?')[0];
+  return { name: providerName(s.provider, s.preset), where: PROVIDERS[s.provider] && PROVIDERS[s.provider].needsUrl && url ? ` (${url})` : '' };
 }
 
 async function loadModels({ permitted = false } = {}) {
@@ -463,12 +484,31 @@ function memorySection() {
   ];
 }
 
+const BACKUP_MAX_BYTES = 20 * 1024 * 1024; // a real backup is a few MB at most
+const FIELD_LABEL = { name: 'fName', about: 'fAbout', services: 'fServices', hours: 'fHours', booking: 'fBooking',
+  signature: 'fSignature', never: 'fNever', tone: 'fTone', emails: 'fEmails' };
+
+// What the file would change, so the person decides before anything comes in.
+function importQuestion(plan) {
+  const lines = [t('importAsk'), ''];
+  lines.push('- ' + (plan.scoped ? t('importMemScoped', { n: plan.added, m: plan.scoped }) : t('importMem', { n: plan.added })));
+  if (plan.profile.length) lines.push('- ' + t('importProfile', { fields: plan.profile.map((k) => t(FIELD_LABEL[k])).join(', ') }));
+  if (plan.addresses.length) lines.push('- ' + t('importAddresses', { list: plan.addresses.join(', ') }));
+  if (plan.ai) lines.push('- ' + t('importAi', aiWhere(plan.ai)));
+  lines.push('', t('importTrust'));
+  return lines.join('\n');
+}
+
 async function importFile(e, mode) {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   try {
-    const r = await store.importBackup(JSON.parse(await f.text()), { mode });
-    toast(mode === 'restore' ? t('backupRestored', { n: r.added }) : t('backupImported', { n: r.added }), 6000);
+    if (f.size > BACKUP_MAX_BYTES) throw new Error('too_big');
+    const data = JSON.parse(await f.text());
+    if (!window.confirm(importQuestion(await store.previewBackup(data, { mode })))) return;
+    const r = await store.importBackup(data, { mode });
+    const done = mode === 'restore' ? (r.restored ? 'backupRestoredAi' : 'backupRestored') : 'backupImported';
+    toast(t(done, { n: r.added }), 8000);
     draft = null;
     await load();
     if (mode === 'restore') {

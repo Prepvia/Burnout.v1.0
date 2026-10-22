@@ -32,8 +32,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 chrome.runtime.onStartup.addListener(panelOnIconClick);
 
+// only Burnout's own button, inside Gmail (web pages can't message Burnout at all: there is no
+// externally_connectable in the manifest)
+const fromGmail = (sender) => !!sender.tab && sender.id === chrome.runtime.id && String(sender.url || '').startsWith('https://mail.google.com/');
+
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg && msg.type === 'jm:openPanel' && sender.tab) {
+  if (msg && msg.type === 'jm:openPanel' && fromGmail(sender)) {
     const tabId = sender.tab.id;
     // first thing in the listener: Chrome only opens the panel in direct response to the user's click
     chrome.sidePanel.open({ tabId }).catch(() => {

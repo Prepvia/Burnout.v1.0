@@ -99,6 +99,7 @@ export class AIError extends Error {
   /**
    * code: no_provider | no_key | key_format | no_url | no_model | url_bad | url_https | key | key_gemini | credit | region
    *       | quota | model | too_long | url | down | network | unreachable | origin | timeout | refused | empty | bad_request
+   *       | permission
    */
   constructor(code, detail = '') {
     super(code);
@@ -659,6 +660,22 @@ function resolve(cfg) {
 }
 
 /**
+ * An address the person typed (Other AI, Company AI) only gets email after Chrome let Burnout
+ * talk to it, which Test and save asks for, naming the site. Without that, a setting that
+ * arrived some other way (a backup file) can't send anything there. The three main AIs are
+ * allowed at install. Outside the extension (tests, previews) there's no permissions API.
+ */
+async function allowed(c) {
+  const perms = globalThis.chrome && globalThis.chrome.permissions;
+  if (!PROVIDERS[c.provider].needsUrl || !perms || typeof perms.contains !== 'function') return true;
+  try {
+    return await perms.contains({ origins: [originFor(c)] });
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * cfg = { provider, apiKey, model, baseUrl }. Returns { text, model, usage: {input, output}, truncated }.
  * system: a text, or [fixed part, thread part] (Claude keeps the fixed part cached).
  * onText(textSoFar) turns streaming on. purpose (reply | fast | learn) only goes to the own endpoint.
@@ -666,6 +683,7 @@ function resolve(cfg) {
  */
 export async function complete(cfg, { system, user, maxTokens = 2000, timeoutMs = 60000, fetchImpl, onText, purpose = 'fast' } = {}) {
   const { p, c } = resolve(cfg);
+  if (!(await allowed(c))) throw new AIError('permission');
   const f = fetchImpl || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
   const systemParts = [].concat(system || []).map((s) => String(s || '')).filter((s) => s.trim());
   const o = { system: systemParts.join('\n\n'), systemParts, user, maxTokens, timeoutMs, fetchImpl: f, purpose, kind: p.id, onText: null };

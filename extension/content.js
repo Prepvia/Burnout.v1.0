@@ -12,7 +12,7 @@
 // The AI, the memory and the screens live in the panel (panel.js). Gmail selectors
 // checked live on Oct 17, 2026.
 (() => {
-  if (window.__burnoutLoaded) return;
+  if (window.__burnoutLoaded === true) return; // === true: an element with that id can't switch Burnout off
   window.__burnoutLoaded = true;
 
   const SEL = {
@@ -29,6 +29,8 @@
   const FORWARD_RE = /-{5,}\s*(?:Forwarded message|Mensagem encaminhada|Mensaje reenviado|Message transféré|Weitergeleitete Nachricht)/i;
 
   const visible = (el) => !!el && el.getClientRects().length > 0;
+  // Gmail's own controls, never something inside an email's body (div.a3s)
+  const gmailOwn = (el) => !(typeof el.closest === 'function' && el.closest('.a3s'));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const text = (key, fallback) => {
     try {
@@ -181,14 +183,14 @@
     const root = h2 && typeof h2.closest === 'function' ? h2.closest('[role="main"]') : null;
     const roots = root ? [root] : [...document.querySelectorAll('div[role="main"]')].filter(visible);
     for (const r of roots) {
-      const box = [...r.querySelectorAll(SEL.box)].reverse().find(visible);
+      const box = [...r.querySelectorAll(SEL.box)].reverse().find((el) => visible(el) && gmailOwn(el));
       if (box) return box;
     }
     return null;
   }
 
   function visibleButton(selector) {
-    return [...document.querySelectorAll(selector)].reverse().find(visible) || null;
+    return [...document.querySelectorAll(selector)].reverse().find((el) => visible(el) && gmailOwn(el)) || null;
   }
 
   async function waitFor(fn, timeoutMs) {
@@ -254,6 +256,8 @@
       if (!btn) return { ok: false, error: 'no_reply_button' };
       btn.click();
       box = await waitFor(visibleReplyBox, 4000);
+      // the person may have opened another conversation while the box was opening
+      if (threadId && threadId !== currentThreadId()) return { ok: false, error: 'other_thread' };
     }
     if (!box) return { ok: false, error: 'no_box' };
     box.focus();
@@ -293,6 +297,24 @@
     return { ok: true, replaced, stacked };
   }
 
+  // innerText already leaves out display:none and visibility:hidden. This also takes out text the
+  // reader can't see because it's tiny or see-through (the usual way to hide orders for an AI),
+  // like the print page reader does.
+  function shownText(body) {
+    let out = String(body.innerText || body.textContent || '');
+    const hidden = [];
+    for (const el of body.querySelectorAll('*')) {
+      if (hidden.some((x) => x.contains(el))) continue;
+      const cs = getComputedStyle(el);
+      if (parseFloat(cs.fontSize) < 2 || parseFloat(cs.opacity) < 0.1 || /^rgba\(\d+,\d+,\d+,0(?:\.0+)?\)$/.test(cs.color.replace(/\s/g, ''))) hidden.push(el);
+    }
+    for (const el of hidden) {
+      const s = String(el.innerText || el.textContent || '').trim();
+      if (s) out = out.replace(s, '');
+    }
+    return out.trim();
+  }
+
   // Fallback when the print page fails: the messages open on screen (collapsed ones are
   // left out, but the last one, the one that matters, is always open).
   function domThread() {
@@ -309,7 +331,7 @@
         date: when ? String(when.getAttribute('title') || when.textContent || '').trim() : '',
         to: '',
         cc: '',
-        text: body ? String(body.innerText || body.textContent || '').trim().slice(0, 6000) : '',
+        text: body ? shownText(body).slice(0, 6000) : '',
       });
     }
     return { subject: h2 ? String(h2.textContent || '').trim() : '', messages };
@@ -340,7 +362,7 @@
   };
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    const handler = HANDLERS[msg && msg.type];
+    const handler = msg && typeof msg.type === 'string' && Object.hasOwn(HANDLERS, msg.type) ? HANDLERS[msg.type] : null;
     if (!handler) return false;
     handler(msg).then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 120) }));
     return true;

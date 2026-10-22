@@ -7,6 +7,8 @@
 // No DOMParser on purpose: Gmail uses Trusted Types and this code also runs in
 // Node tests. It's a small tag reader that only needs to understand this page.
 
+import { stripInvisible } from './text.js';
+
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
 const TAG_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>/g;
 const EMAIL_RE = /[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
@@ -60,9 +62,66 @@ export function removeBlocks(html, test) {
 
 const hasClass = (attrs, cls) => new RegExp(`class\\s*=\\s*["']?[^"'>]*\\b${cls}\\b`, 'i').test(attrs);
 
-// Hidden text in the email (display:none, font size 0...): someone reading in Gmail can't see it,
-// so the AI doesn't read it either. It's the usual way to hide instructions for an AI in an email.
-const HIDDEN_RE = /style\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?![.\d])|max-height\s*:\s*0(?![.\d])|opacity\s*:\s*0(?![.\d]))/i;
+// Hidden text in the email: someone reading in Gmail can't see it, so the AI doesn't read it
+// either. It's the usual way to hide instructions for an AI in an email. Best effort: it reads
+// each tag's own style (and the hidden attribute), not the email's <style> rules, which Gmail
+// mostly drops anyway.
+function styleOf(attrs) {
+  const m = /(?:^|\s)style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(attrs);
+  return m ? decodeEntities(m[1] ?? m[2] ?? m[3] ?? '').toLowerCase() : '';
+}
+
+/** The value of one CSS property in a style attribute (the last one wins, like in CSS). */
+function cssValue(style, prop) {
+  let v = null;
+  for (const decl of style.split(';')) {
+    const i = decl.indexOf(':');
+    if (i > 0 && decl.slice(0, i).trim() === prop) v = decl.slice(i + 1).replace(/!\s*important/g, '').trim();
+  }
+  return v;
+}
+
+const isZero = (v) => v != null && /^[-+]?0*\.?0+(?:[a-z]{1,4}|%)?$/.test(v);
+const number = (v) => (v == null ? NaN : parseFloat(v));
+
+// smaller than 2px is unreadable: 0, 1px, 0.5px, 1pt, 0.1em
+function tinyFont(v) {
+  const m = /^(\d*\.?\d+)\s*(px|pt|em|rem|%)?$/.exec(v || '');
+  if (!m) return false;
+  const n = parseFloat(m[1]);
+  const px = { pt: (4 / 3) * n, em: 16 * n, rem: 16 * n, '%': 0.16 * n }[m[2]] ?? n;
+  return px < 2;
+}
+
+function seeThrough(v) {
+  if (v == null) return false;
+  if (v.endsWith('%')) return parseFloat(v) < 10;
+  return number(v) < 0.1;
+}
+
+// transparent text, or white text with no background of its own (white on the white page)
+function invisibleColor(color, style) {
+  if (color == null) return false;
+  if (/^transparent$|^rgba\([^)]*,\s*0*\.?0+\s*\)$|^#[0-9a-f]{3}0$|^#[0-9a-f]{6}00$/.test(color)) return true;
+  const white = /^(?:#fff|#ffffff|white|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))$/.test(color);
+  return white && cssValue(style, 'background') == null && cssValue(style, 'background-color') == null;
+}
+
+/** The tag hides its content from someone reading the email. */
+export function hidesText(attrs) {
+  const a = String(attrs || '');
+  if (/(?:^|\s)hidden(?=\s|=|\/|$)/i.test(a.replace(/"[^"]*"|'[^']*'/g, '""'))) return true; // <div hidden>
+  const s = styleOf(a);
+  if (!s) return false;
+  const v = (p) => cssValue(s, p);
+  if (v('display') === 'none' || /^(?:hidden|collapse)$/.test(v('visibility') || '') || v('mso-hide') === 'all') return true;
+  if (seeThrough(v('opacity')) || tinyFont(v('font-size')) || invisibleColor(v('color'), s)) return true;
+  if (isZero(v('max-height')) || isZero(v('max-width'))) return true;
+  if ((isZero(v('height')) || isZero(v('width')) || isZero(v('line-height'))) && /hidden|clip/.test(v('overflow') || '')) return true;
+  if (number(v('text-indent')) <= -999) return true;
+  if (/^(?:absolute|fixed)$/.test(v('position') || '') && ['left', 'top', 'right'].some((p) => number(v(p)) <= -999)) return true;
+  return /rect\(\s*0/.test(v('clip') || '') || /inset\(\s*(?:50|100)%/.test(v('clip-path') || '');
+}
 
 /** Email HTML -> text. dropQuotes removes quoted replies (gmail_quote, blockquote). */
 export function htmlToText(html, { dropQuotes = true } = {}) {
@@ -72,7 +131,7 @@ export function htmlToText(html, { dropQuotes = true } = {}) {
   const bodyAt = h.search(/<body\b/i);
   if (bodyAt > 0) h = h.slice(bodyAt);
   h = h.replace(/<(script|style|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  h = removeBlocks(h, (name, attrs) => HIDDEN_RE.test(attrs));
+  h = removeBlocks(h, (name, attrs) => hidesText(attrs));
   if (dropQuotes) {
     h = removeBlocks(h, (name, attrs) =>
       name === 'blockquote' ||
@@ -85,7 +144,7 @@ export function htmlToText(html, { dropQuotes = true } = {}) {
   h = h.replace(/<(p|div|tr|table|h[1-6])\b[^>]*>/gi, '\n');
   h = h.replace(/<\/t[dh]>/gi, ' ');
   h = h.replace(TAG_RE, '');
-  let t = decodeEntities(h).replace(/ /g, ' ').replace(/\r/g, '');
+  let t = stripInvisible(decodeEntities(h)).replace(/ /g, ' ').replace(/\r/g, '');
   t = t.split('\n').map((l) => l.replace(/[ \t]+/g, ' ').trim()).join('\n');
   return t.replace(/\n{3,}/g, '\n\n').trim();
 }

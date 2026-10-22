@@ -37,14 +37,25 @@ export function parseLearnJson(text) {
   }
 }
 
+// A plain-text reply quotes the other person under "On <date>, <name> wrote:" and with "> " lines.
+// That part is theirs, so it stays out of Learn (Gmail's own quote blocks are already gone).
+const QUOTE_HEAD_RE = /^\s*(?:On\b.{4,200}\bwrote:|Em\b.{4,200}\bescreveu:|El\b.{4,200}\bescribió:|-{2,}\s*Original Message\s*-{2,}|-{2,}\s*Mensagem original\s*-{2,})\s*$/i;
+
+export function ownPart(text) {
+  const lines = String(text || '').split('\n');
+  const cut = lines.findIndex((l) => QUOTE_HEAD_RE.test(l));
+  return (cut >= 0 ? lines.slice(0, cut) : lines).filter((l) => !/^\s*>/.test(l)).join('\n').trim();
+}
+
 /** The messages the user wrote in a thread (me = their address or a list of their addresses). */
 export function ownMessages(thread, me) {
   const mine = mineSet(me instanceof Set ? [...me] : me);
   if (!mine.size && thread.account) mine.add(String(thread.account).toLowerCase());
   if (!mine.size) return [];
   return (thread.messages || [])
-    .filter((m) => mine.has(m.fromEmail) && String(m.text || '').trim().length >= MIN_CHARS)
-    .map((m) => ({ date: m.date, to: m.to, subject: thread.subject, text: m.text.slice(0, 1500) }));
+    .filter((m) => mine.has(m.fromEmail))
+    .map((m) => ({ date: m.date, to: m.to, subject: thread.subject, text: ownPart(m.text).slice(0, 1500) }))
+    .filter((e) => e.text.length >= MIN_CHARS);
 }
 
 const firstName = (s) => String(s || '').trim().toLowerCase().split(/\s+/)[0] || '';

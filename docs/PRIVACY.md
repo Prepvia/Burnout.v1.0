@@ -1,6 +1,6 @@
 # Burnout for Gmail: where your data goes
 
-Last updated: October 17, 2026.
+Last updated: October 21, 2026.
 
 Burnout for Gmail is an open-source Chrome extension that you install yourself from this
 repository. It writes email replies in Gmail using the artificial intelligence (AI) you choose,
@@ -16,7 +16,7 @@ server and no account: nobody behind it, its authors included, receives anything
 - The text you selected with the mouse, when you click "Selected text".
 - The emails you sent, only when you click "Learn from my sent emails". Of those, only the messages
   you wrote yourself go to the AI, with their date, recipient and subject. Other people's messages
-  are left out.
+  are left out, and so is what you quoted from them under your reply.
 
 ## Where it goes
 
@@ -36,7 +36,9 @@ Only to the AI you chose, straight from your browser, and only to produce the te
 - **A model on your own computer** (Ollama, LM Studio): then the text does not leave your computer.
 
 Nowhere else. There is no Burnout server: its authors never receive, store, sell or share any of
-your emails, keys, profile or memory.
+your emails, keys, profile or memory. An address you type (Other AI, Company AI) gets nothing until
+you click Test and save and Chrome lets Burnout talk to it, and an AI connection that comes in a
+backup file waits for that same click. More in [SECURITY.md](../SECURITY.md).
 
 ## What is stored, and where
 
@@ -65,9 +67,10 @@ Everything stays in your browser (the extension's local storage), never on a ser
 Whole emails are not stored: Burnout reads them when you ask, uses them and discards them. Only the
 pieces listed above are kept.
 
-The backup (Settings > Memory > Download backup) is a file with all of the above, saved wherever
-you choose. The AI key goes in it only if you tick that option, and then it is stored as plain text
-in the file.
+The backup (Settings > Memory > Download backup) is a file with the above, saved wherever you
+choose, except the list of conversations Learn already read, which conversations Auto-draft already
+drafted and the request count. The AI key goes in it only if you tick that option, and then it is
+stored as plain text in the file. Importing a backup shows what it brings and asks first.
 
 ## What Burnout does not do
 

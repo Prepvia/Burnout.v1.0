@@ -208,7 +208,11 @@ email, the profile, the memory or the request.
 ## Security
 
 - The key stays only in the person's browser and goes only to the configured address.
-- The sender's email is treated as data: the prompt says to ignore any orders inside it, and text
-  hidden in the email (`display:none`, `visibility:hidden`, zero-size font, zero opacity) never
-  even reaches the AI.
+- Your address gets nothing until the person clicks Test and save and Chrome allows it. An address
+  that arrives in a backup file waits for that same click.
+- The sender's email is treated as data: the prompt says to ignore any orders inside it, and most
+  text hidden in the email (`display:none`, `visibility:hidden`, the `hidden` attribute, tiny,
+  see-through or white-on-white text, text pushed off screen, invisible characters) never reaches
+  the AI. It's best effort: an email can hide text in ways the filter doesn't know.
 - Keep your server's logs without the email content, or only for a short time.
+- More in [SECURITY.md](../SECURITY.md).

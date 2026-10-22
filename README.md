@@ -50,6 +50,7 @@ file too.
 
 **Another computer:** Chrome doesn't copy Burnout to your other computers. Install it there, then
 click **Already use Burnout? Restore a backup** on the first setup screen and pick your backup file.
+Burnout shows what the file brings and asks first; then check the AI and click **Test and save**.
 
 ## What it does
 
@@ -151,6 +152,12 @@ leaves the browser only to the AI you chose, when you ask for something (or when
 with Auto-draft on). Burnout never sends, deletes or archives email. Details:
 [docs/PRIVACY.md](docs/PRIVACY.md).
 
+## Security
+
+No server, no tracking, no code from the internet, and nothing it can send on its own. What it can
+and can't do, what was checked on October 21, 2026 (and fixed in 0.3.1), and how to check it
+yourself: [SECURITY.md](SECURITY.md).
+
 ## For developers
 
 Plain JavaScript (Manifest V3), with no build step and no dependencies.
@@ -171,7 +178,7 @@ Plain JavaScript (Manifest V3), with no build step and no dependencies.
 ### How it's tested
 
 ```
-node tests/run.mjs            # 58 tests, no dependencies (Node 18+)
+node tests/run.mjs            # 62 tests, no dependencies (Node 18+)
 python scripts/e2e.py         # the real extension in Chromium on a test Gmail page, with simulated AIs
 python scripts/live_check.py  # the real extension against a real model on your computer (Ollama)
 ```
@@ -194,6 +201,9 @@ What has been checked for real, on October 17, 2026:
 - **Not yet checked on a real Gmail:** putting the reply into the reply box, the panel opening from
   the button and Alt+J, and a real Gemini, OpenAI or Anthropic key. They pass the end-to-end test
   and follow Chrome's and the providers' documented behavior.
+- **Security, on October 21, 2026:** every file read line by line, and a booby-trapped backup
+  restored in Chromium with the real permissions: Burnout asked first, the file's AI waited for
+  Test and save, and nothing reached the file's server. Details: [SECURITY.md](SECURITY.md).
 
 ### Project layout
 

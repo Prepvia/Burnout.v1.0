@@ -18,7 +18,7 @@ import { icon } from './lib/icons.js';
 import { LEARN_DEFAULT, learnFromThreads } from './lib/learn.js';
 import * as P from './lib/prompts.js';
 import * as store from './lib/store.js';
-import { cleanClientText, clip, hasUnknownMoney, isAutomatedSender, localMonth, pasteKeys, readyText, stripReadyMarkers, timeZone } from './lib/text.js';
+import { cleanClientText, clip, hasUnknownMoney, isAutomatedSender, localMonth, pasteKeys, readyText, stripInvisible, stripReadyMarkers, timeZone } from './lib/text.js';
 
 const app = document.getElementById('app');
 
@@ -146,7 +146,10 @@ async function refresh() {
     if (!r || !r.ok) throw new Error((r && r.error) || 'no_thread');
     let parsed = r.html ? parsePrintView(r.html) : null;
     // print page with no messages at all (format changed): use what is open on screen
-    if (!parsed || !parsed.messages.length) parsed = r.dom && r.dom.messages.length ? { account: '', ...r.dom } : null;
+    if (!parsed || !parsed.messages.length) {
+      parsed = r.dom && r.dom.messages.length
+        ? { account: '', ...r.dom, messages: r.dom.messages.map((m) => ({ ...m, text: stripInvisible(m.text) })) } : null;
+    }
     if (!parsed) throw new Error('no_messages');
     // who the owner is: the account in the print page's header; the tab title is only the fallback
     st.me = String(parsed.account || r.me || st.me || '').toLowerCase();

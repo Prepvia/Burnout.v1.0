@@ -4,7 +4,7 @@
   "short_name": "Burnout",
   "description": "__MSG_appDesc__",
   "homepage_url": "https://github.com/Prepvia/Burnout.v1.0",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo/EOTHBwLh2zPwApS5U1uRXiHk6CK/1PznLwI3vhSe0939Od7cxxPV+Yh0XL76+MacVlUBdMtTG+3XpN6vh3Dg44u02yKxXiHYjPkBbDJW6ORCUdPERafNUWCipnIef7vpC17vXEfhl92NhBKq9N7E90XpwOfuYizIFFN/1Tn0bc2EaD6FKQTNp8h2xHSXvOGuxbtphwvGNxOnWZhuJuvTj+t8498Ob1JGW3nu59gsVj0It1RKT83h8/+XVMWKX4+2u21NQ0uYYdWiI0kQYT9xn+8g4MfbOK05V/QE8syUKH2x823AXS3r/Bq00P4FrJgyZY578tmo73BoiGQzbmowIDAQAB",
   "default_locale": "en",
   "minimum_chrome_version": "116",

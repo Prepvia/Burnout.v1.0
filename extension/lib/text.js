@@ -19,8 +19,19 @@ export function oneLine(text, n = 300) {
   return String(text || '').replace(/\s+/g, ' ').trim().slice(0, n);
 }
 
+// Characters nobody can see: "tag" letters, zero-width spaces, word joiners and direction
+// overrides. They're a known way to hide text from a person and still have an AI read it, or
+// to slip data out inside a reply. The joiners that some scripts and emoji need (ZWJ, ZWNJ, LRM,
+// RLM) stay, unless several come in a row, which no language needs.
+const INVISIBLE_RUN_RE = /[᠎​-‏‪-‮⁠-⁤⁦-⁩﻿]{2,}/g;
+const INVISIBLE_RE = /[᠎​‪-‮⁠-⁤⁦-⁩﻿\u{E0000}-\u{E007F}]/gu;
+
+export function stripInvisible(text) {
+  return String(text || '').replace(INVISIBLE_RUN_RE, '').replace(INVISIBLE_RE, '');
+}
+
 export function cleanClientText(text, max = 8000) {
-  let t = String(text || '').replace(/\r\n/g, '\n').trim();
+  let t = stripInvisible(String(text || '').replace(/\r\n/g, '\n')).trim();
   if (t.startsWith('```')) t = t.replace(/^```[a-z]*\n?|\n?```$/g, '').trim();
   if (t.length > 1 && t[0] === '"' && t[t.length - 1] === '"') t = t.slice(1, -1).trim();
   t = t.replace(new RegExp('^[ \\t]*' + DASH + '[ \\t]*', 'gm'), '');          // dash opening a line
